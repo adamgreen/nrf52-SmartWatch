@@ -1,0 +1,340 @@
+diff -Naurb nrfSDK2/components/ble/ble_advertising/ble_advertising.c nrfSDK/components/ble/ble_advertising/ble_advertising.c
+--- nrfSDK2/components/ble/ble_advertising/ble_advertising.c	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/ble/ble_advertising/ble_advertising.c	2022-04-27 00:50:11.000000000 -0700
+@@ -322,7 +322,7 @@
+             p_adv_params->p_whitelist = &m_whitelist;
+         #endif
+ 
+-        p_adv_params->fp = BLE_GAP_ADV_FP_FILTER_CONNREQ;
++        p_adv_params->fp = BLE_GAP_ADV_FP_FILTER_BOTH;
+         m_advdata.flags  = BLE_GAP_ADV_FLAG_BR_EDR_NOT_SUPPORTED;
+ 
+         ret = ble_advdata_set(&m_advdata, NULL);
+@@ -365,7 +365,7 @@
+         }
+         #endif
+ 
+-        p_adv_params->fp = BLE_GAP_ADV_FP_FILTER_CONNREQ;
++        p_adv_params->fp = BLE_GAP_ADV_FP_FILTER_BOTH;
+         m_advdata.flags  = BLE_GAP_ADV_FLAG_BR_EDR_NOT_SUPPORTED;
+ 
+         ret = ble_advdata_set(&m_advdata, NULL);
+diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c nrfSDK/components/ble/ble_services/ble_nus/ble_nus.c
+--- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.c	2022-04-27 00:50:11.000000000 -0700
+@@ -131,7 +131,7 @@
+     memset(&cccd_md, 0, sizeof(cccd_md));
+ 
+     BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.read_perm);
+-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&cccd_md.write_perm);
++    cccd_md.write_perm = p_nus_init->cccd_write_perm;
+ 
+     cccd_md.vloc = BLE_GATTS_VLOC_STACK;
+ 
+@@ -149,8 +149,8 @@
+ 
+     memset(&attr_md, 0, sizeof(attr_md));
+ 
+-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
++    attr_md.read_perm = p_nus_init->rx_read_perm;
++    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.write_perm);
+ 
+     attr_md.vloc    = BLE_GATTS_VLOC_STACK;
+     attr_md.rd_auth = 0;
+@@ -202,8 +202,8 @@
+ 
+     memset(&attr_md, 0, sizeof(attr_md));
+ 
+-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.read_perm);
+-    BLE_GAP_CONN_SEC_MODE_SET_OPEN(&attr_md.write_perm);
++    BLE_GAP_CONN_SEC_MODE_SET_NO_ACCESS(&attr_md.read_perm);
++    attr_md.write_perm = p_nus_init->tx_write_perm;
+ 
+     attr_md.vloc    = BLE_GATTS_VLOC_STACK;
+     attr_md.rd_auth = 0;
+diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h nrfSDK/components/ble/ble_services/ble_nus/ble_nus.h
+--- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.h	2022-04-27 00:50:11.000000000 -0700
+@@ -86,6 +86,9 @@
+  */
+ typedef struct
+ {
++    ble_gap_conn_sec_mode_t cccd_write_perm;
++    ble_gap_conn_sec_mode_t rx_read_perm;
++    ble_gap_conn_sec_mode_t tx_write_perm;
+     ble_nus_data_handler_t data_handler; /**< Event handler to be called for handling received data. */
+ } ble_nus_init_t;
+ 
+diff -Naurb nrfSDK2/components/drivers_nrf/hal/nrf_spim.h nrfSDK/components/drivers_nrf/hal/nrf_spim.h
+--- nrfSDK2/components/drivers_nrf/hal/nrf_spim.h	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/hal/nrf_spim.h	2022-04-27 00:50:11.000000000 -0700
+@@ -306,7 +306,7 @@
+  */
+ __STATIC_INLINE void nrf_spim_tx_buffer_set(NRF_SPIM_Type * p_reg,
+                                             uint8_t const * p_buffer,
+-                                            uint8_t         length);
++                                            uint16_t         length);
+ 
+ /**
+  * @brief Function for setting the receive buffer.
+@@ -317,7 +317,7 @@
+  */
+ __STATIC_INLINE void nrf_spim_rx_buffer_set(NRF_SPIM_Type * p_reg,
+                                             uint8_t * p_buffer,
+-                                            uint8_t   length);
++                                            uint16_t   length);
+ 
+ /**
+  * @brief Function for setting the SPI configuration.
+@@ -467,7 +467,7 @@
+ 
+ __STATIC_INLINE void nrf_spim_tx_buffer_set(NRF_SPIM_Type * p_reg,
+                                             uint8_t const * p_buffer,
+-                                            uint8_t         length)
++                                            uint16_t        length)
+ {
+     p_reg->TXD.PTR    = (uint32_t)p_buffer;
+     p_reg->TXD.MAXCNT = length;
+@@ -475,7 +475,7 @@
+ 
+ __STATIC_INLINE void nrf_spim_rx_buffer_set(NRF_SPIM_Type * p_reg,
+                                             uint8_t * p_buffer,
+-                                            uint8_t   length)
++                                            uint16_t  length)
+ {
+     p_reg->RXD.PTR    = (uint32_t)p_buffer;
+     p_reg->RXD.MAXCNT = length;
+diff -Naurb nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c nrfSDK/components/drivers_nrf/qdec/nrf_drv_qdec.c
+--- nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/qdec/nrf_drv_qdec.c	2022-06-04 01:36:08.000000000 -0700
+@@ -133,21 +133,17 @@
+     {
+         m_qdec_event_handler = event_handler;
+     }
+-    else
++
++    if (p_config->pselled != 0xFFFFFFFF)
+     {
+-        err_code = NRF_ERROR_INVALID_PARAM;
+-        NRF_LOG_WARNING("Function: %s, error code: %s.\r\n", (uint32_t)__func__, (uint32_t)ERR_TO_STR(err_code));
+-        return err_code;
++        nrf_gpio_cfg_input(p_config->pselled, NRF_GPIO_PIN_NOPULL);
+     }
+-
+     nrf_qdec_sampleper_set(p_config->sampleper);
+-    nrf_gpio_cfg_input(p_config->pselled, NRF_GPIO_PIN_NOPULL);
+     nrf_gpio_cfg_input(p_config->psela, NRF_GPIO_PIN_NOPULL);
+     nrf_gpio_cfg_input(p_config->pselb, NRF_GPIO_PIN_NOPULL);
+     nrf_qdec_pio_assign( p_config->psela, p_config->pselb, p_config->pselled);
+     nrf_qdec_ledpre_set(p_config->ledpre);
+     nrf_qdec_ledpol_set(p_config->ledpol);
+-    nrf_qdec_shorts_enable(NRF_QDEC_SHORT_REPORTRDY_READCLRACC_MASK);
+ 
+     if (p_config->dbfen)
+     {
+@@ -162,6 +158,7 @@
+ 
+     if (p_config->reportper != NRF_QDEC_REPORTPER_DISABLED)
+     {
++        nrf_qdec_shorts_enable(NRF_QDEC_SHORT_REPORTRDY_READCLRACC_MASK);
+         nrf_qdec_reportper_set(p_config->reportper);
+         int_mask |= NRF_QDEC_INT_REPORTRDY_MASK;
+     }
+@@ -171,8 +168,11 @@
+         int_mask |= NRF_QDEC_INT_SAMPLERDY_MASK;
+     }
+ 
++    if (event_handler)
++    {
+     nrf_qdec_int_enable(int_mask);
+     nrf_drv_common_irq_enable(QDEC_IRQn, p_config->interrupt_priority);
++    }
+ 
+     m_state = NRF_DRV_STATE_INITIALIZED;
+ 
+diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.c
+--- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.c	2022-04-27 00:50:11.000000000 -0700
+@@ -127,7 +127,7 @@
+     //  are not concurrently used in IRQ handlers and main line code]
+     uint8_t         ss_pin;
+     uint8_t         orc;
+-    uint8_t         bytes_transferred;
++    uint16_t        bytes_transferred;
+ 
+     bool tx_done : 1;
+     bool rx_done : 1;
+@@ -342,9 +342,9 @@
+ 
+ ret_code_t nrf_drv_spi_transfer(nrf_drv_spi_t const * const p_instance,
+                                 uint8_t const * p_tx_buffer,
+-                                uint8_t         tx_buffer_length,
++                                uint16_t        tx_buffer_length,
+                                 uint8_t       * p_rx_buffer,
+-                                uint8_t         rx_buffer_length)
++                                uint16_t        rx_buffer_length)
+ {
+     nrf_drv_spi_xfer_desc_t xfer_desc;
+     xfer_desc.p_tx_buffer = p_tx_buffer;
+diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.h
+--- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.h	2022-04-27 00:50:11.000000000 -0700
+@@ -207,9 +207,9 @@
+ typedef struct
+ {
+     uint8_t const * p_tx_buffer; ///< Pointer to TX buffer.
+-    uint8_t         tx_length;   ///< TX buffer length.
++    uint16_t        tx_length;   ///< TX buffer length.
+     uint8_t       * p_rx_buffer; ///< Pointer to RX buffer.
+-    uint8_t         rx_length;   ///< RX buffer length.
++    uint16_t        rx_length;   ///< RX buffer length.
+ }nrf_drv_spi_xfer_desc_t;
+ 
+ 
+@@ -325,9 +325,9 @@
+  */
+ ret_code_t nrf_drv_spi_transfer(nrf_drv_spi_t const * const p_instance,
+                                 uint8_t const * p_tx_buffer,
+-                                uint8_t         tx_buffer_length,
++                                uint16_t         tx_buffer_length,
+                                 uint8_t       * p_rx_buffer,
+-                                uint8_t         rx_buffer_length);
++                                uint16_t         rx_buffer_length);
+ 
+ 
+ /**
+diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.c
+--- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.c	2022-09-09 03:41:15.000000000 -0700
+@@ -832,11 +832,15 @@
+             {
+                 NRF_LOG_DEBUG("TWIM: Event: %s.\r\n", (uint32_t)EVT_TO_STR_TWIM(NRF_TWIM_EVENT_ERROR)); 
+                 nrf_twim_event_clear(p_twim, NRF_TWIM_EVENT_ERROR);
++                if (!nrf_twim_event_check(p_twim, NRF_TWIM_EVENT_STOPPED))
++                {
++                    /* If last byte of write was the one NAKed then STOP has already been requested via shortcut. */
+                 nrf_twim_task_trigger(p_twim, NRF_TWIM_TASK_RESUME);
+                 nrf_twim_task_trigger(p_twim, NRF_TWIM_TASK_STOP);
+                 evt_to_wait = NRF_TWIM_EVENT_STOPPED;
+             }
+         }
++        }
+ 
+         uint32_t errorsrc =  nrf_twim_errorsrc_get_and_clear(p_twim);
+ 
+@@ -976,6 +980,13 @@
+         NRF_LOG_DEBUG("TWIM: Event: %s.\r\n", (uint32_t)EVT_TO_STR_TWIM(NRF_TWIM_EVENT_STOPPED));
+         nrf_twim_event_clear(p_twim, NRF_TWIM_EVENT_STOPPED);
+         event.xfer_desc = p_cb->xfer_desc;
++
++        /* Handle NAK error being sent for last byte which will cause a race between STOPPED and ERROR events. */
++        if (nrf_twim_event_check(p_twim, NRF_TWIM_EVENT_ERROR))
++        {
++            nrf_twim_event_clear(p_twim, NRF_TWIM_EVENT_ERROR);
++            NRF_LOG_DEBUG("TWIM: Event: %s.\r\n", (uint32_t)EVT_TO_STR_TWIM(NRF_TWIM_EVENT_ERROR));
++        }
+         if (p_cb->error)
+         {
+ 
+diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.h
+--- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h	2017-05-05 14:10:54.000000000 -0700
++++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.h	2022-08-15 17:22:54.000000000 -0700
+@@ -78,9 +78,9 @@
+ 
+ #if defined(TWIM_IN_USE)
+     #define NRF_DRV_TWI_PERIPHERAL(id)           \
+-        (CONCAT_3(TWI, id, _USE_EASY_DMA) == 1 ? \
++        (NRF_TWI_Type*)((CONCAT_3(TWI, id, _USE_EASY_DMA) == 1 ? \
+             (void *)CONCAT_2(NRF_TWIM, id)       \
+-          : (void *)CONCAT_2(NRF_TWI, id))
++          : (void *)CONCAT_2(NRF_TWI, id)))
+ #else
+     #define NRF_DRV_TWI_PERIPHERAL(id)  (void *)CONCAT_2(NRF_TWI, id)
+ #endif
+@@ -93,10 +93,10 @@
+ {
+     union
+     {
++        NRF_TWI_Type  * p_twi;  ///< Pointer to a structure with TWI registers.
+ #ifdef TWIM_IN_USE
+         NRF_TWIM_Type * p_twim; ///< Pointer to a structure with TWIM registers.
+ #endif
+-        NRF_TWI_Type  * p_twi;  ///< Pointer to a structure with TWI registers.
+     } reg;
+     uint8_t drv_inst_idx; ///< Driver instance index.
+     bool    use_easy_dma; ///< True if the peripheral with EasyDMA (TWIM) shall be used.
+diff -Naurb nrfSDK2/components/softdevice/s130/headers/nrf_svc.h nrfSDK/components/softdevice/s130/headers/nrf_svc.h
+--- nrfSDK2/components/softdevice/s130/headers/nrf_svc.h	2016-04-20 15:57:06.000000000 -0700
++++ nrfSDK/components/softdevice/s130/headers/nrf_svc.h	2022-04-27 00:50:11.000000000 -0700
+@@ -52,7 +52,7 @@
+ #define SVCALL(number, return_type, signature) return_type __svc(number) signature
+ #elif defined (__GNUC__)
+ #ifdef __cplusplus
+-#define GCC_CAST_CPP (uint8_t)
++#define GCC_CAST_CPP (uint16_t)
+ #else
+ #define GCC_CAST_CPP    
+ #endif
+diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.common nrfSDK/components/toolchain/gcc/Makefile.common
+--- nrfSDK2/components/toolchain/gcc/Makefile.common	2017-05-05 13:10:30.000000000 -0700
++++ nrfSDK/components/toolchain/gcc/Makefile.common	2022-07-16 19:09:28.000000000 -0700
+@@ -108,7 +108,8 @@
+ define define_target
+ $(eval OUTPUT_FILE := $(OUTPUT_DIRECTORY)/$(strip $(1))) \
+ $(eval $(1): $(OUTPUT_FILE).out $(OUTPUT_FILE).hex $(OUTPUT_FILE).bin) \
+-$(call prepare_build, $(1), $(OUTPUT_FILE).out)
++$(call prepare_build, $(1), $(OUTPUT_FILE).out) \
++$(eval $(OUTPUT_FILE).out: $$(LIB_FILES))
+ endef
+ 
+ # $1 target name
+@@ -150,10 +151,11 @@
+   "$(MAKE)" -s --no-print-directory -f $(TEMPLATE_PATH)/file_list.mk
+ # Link object files
+ %.out:
+-	$(eval FILE_LIST := $^ $(LIB_FILES))
++	$(eval FILE_LIST := $^)
+ 	$(NO_ECHO)$(DUMP_FILE_LIST) > $(@:.out=.in)
+ 	@echo Linking target: $@
+-	$(NO_ECHO)$(CC) -Wl,-Map=$(@:.out=.map) $(LDFLAGS) @$(@:.out=.in) -lm -o $@
++	$(NO_ECHO)$(CC) -Wl,-Map=$(@:.out=.map) $(LDFLAGS) @$(@:.out=.in) $(SYSLIBS) -o $@
++	$(NO_ECHO)$(OBJDUMP) -d -f -M reg-names-std --demangle $@ > $(@:.out=.disasm)
+ 	-@echo ''
+ 	$(NO_ECHO)$(SIZE) $@
+ 	-@echo ''
+diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.posix nrfSDK/components/toolchain/gcc/Makefile.posix
+--- nrfSDK2/components/toolchain/gcc/Makefile.posix	2017-05-05 13:10:30.000000000 -0700
++++ nrfSDK/components/toolchain/gcc/Makefile.posix	2022-04-27 00:50:11.000000000 -0700
+@@ -1,3 +1,3 @@
+-GNU_INSTALL_ROOT := /usr/local/gcc-arm-none-eabi-4_9-2015q3
+-GNU_VERSION := 4.9.3
++GNU_INSTALL_ROOT := $(patsubst %/bin/,%,$(dir $(shell which arm-none-eabi-gcc)))
++GNU_VERSION := 7.3.1
+ GNU_PREFIX := arm-none-eabi
+diff -Naurb nrfSDK2/components/toolchain/gcc/nrf5x_common.ld nrfSDK/components/toolchain/gcc/nrf5x_common.ld
+--- nrfSDK2/components/toolchain/gcc/nrf5x_common.ld	2017-05-05 13:10:52.000000000 -0700
++++ nrfSDK/components/toolchain/gcc/nrf5x_common.ld	2022-09-11 01:46:34.000000000 -0700
+@@ -87,10 +87,10 @@
+     } > FLASH
+     __exidx_end = .;
+ 
+-    __etext = .;
+-
+-    .data : AT (__etext)
++    .data :
+     {
++        PROVIDE(__etext = LOADADDR(.data));
++        . = ALIGN(4);
+         __data_start__ = .;
+         *(vtable)
+         *(.data*)
+@@ -121,7 +121,7 @@
+         /* All data end */
+         __data_end__ = .;
+ 
+-    } > RAM
++    } > RAM AT > FLASH
+ 
+     .bss :
+     {
