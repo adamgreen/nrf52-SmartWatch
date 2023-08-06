@@ -1,6 +1,6 @@
 diff -Naurb nrfSDK2/components/ble/ble_advertising/ble_advertising.c nrfSDK/components/ble/ble_advertising/ble_advertising.c
---- nrfSDK2/components/ble/ble_advertising/ble_advertising.c	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/ble/ble_advertising/ble_advertising.c	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/ble/ble_advertising/ble_advertising.c	2017-05-05 14:10:54
++++ nrfSDK/components/ble/ble_advertising/ble_advertising.c	2023-07-14 21:13:28
 @@ -322,7 +322,7 @@
              p_adv_params->p_whitelist = &m_whitelist;
          #endif
@@ -20,8 +20,8 @@ diff -Naurb nrfSDK2/components/ble/ble_advertising/ble_advertising.c nrfSDK/comp
  
          ret = ble_advdata_set(&m_advdata, NULL);
 diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c nrfSDK/components/ble/ble_services/ble_nus/ble_nus.c
---- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.c	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c	2017-05-05 14:10:54
++++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.c	2023-07-14 21:13:28
 @@ -131,7 +131,7 @@
      memset(&cccd_md, 0, sizeof(cccd_md));
  
@@ -54,8 +54,8 @@ diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.c nrfSDK/compone
      attr_md.vloc    = BLE_GATTS_VLOC_STACK;
      attr_md.rd_auth = 0;
 diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h nrfSDK/components/ble/ble_services/ble_nus/ble_nus.h
---- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.h	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h	2017-05-05 14:10:54
++++ nrfSDK/components/ble/ble_services/ble_nus/ble_nus.h	2023-07-14 21:13:28
 @@ -86,6 +86,9 @@
   */
  typedef struct
@@ -67,8 +67,8 @@ diff -Naurb nrfSDK2/components/ble/ble_services/ble_nus/ble_nus.h nrfSDK/compone
  } ble_nus_init_t;
  
 diff -Naurb nrfSDK2/components/drivers_nrf/hal/nrf_spim.h nrfSDK/components/drivers_nrf/hal/nrf_spim.h
---- nrfSDK2/components/drivers_nrf/hal/nrf_spim.h	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/hal/nrf_spim.h	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/hal/nrf_spim.h	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/hal/nrf_spim.h	2023-07-14 21:13:28
 @@ -306,7 +306,7 @@
   */
  __STATIC_INLINE void nrf_spim_tx_buffer_set(NRF_SPIM_Type * p_reg,
@@ -106,8 +106,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/hal/nrf_spim.h nrfSDK/components/driv
      p_reg->RXD.PTR    = (uint32_t)p_buffer;
      p_reg->RXD.MAXCNT = length;
 diff -Naurb nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c nrfSDK/components/drivers_nrf/qdec/nrf_drv_qdec.c
---- nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/qdec/nrf_drv_qdec.c	2022-06-04 01:36:08.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/qdec/nrf_drv_qdec.c	2023-07-14 21:13:28
 @@ -133,21 +133,17 @@
      {
          m_qdec_event_handler = event_handler;
@@ -154,8 +154,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/qdec/nrf_drv_qdec.c nrfSDK/components
      m_state = NRF_DRV_STATE_INITIALIZED;
  
 diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.c
---- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.c	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.c	2023-07-14 21:13:28
 @@ -127,7 +127,7 @@
      //  are not concurrently used in IRQ handlers and main line code]
      uint8_t         ss_pin;
@@ -178,8 +178,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.c nrfSDK/compo
      nrf_drv_spi_xfer_desc_t xfer_desc;
      xfer_desc.p_tx_buffer = p_tx_buffer;
 diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.h
---- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.h	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/spi_master/nrf_drv_spi.h	2023-07-14 21:13:28
 @@ -207,9 +207,9 @@
  typedef struct
  {
@@ -205,8 +205,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/spi_master/nrf_drv_spi.h nrfSDK/compo
  
  /**
 diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.c
---- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.c	2022-09-09 03:41:15.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.c	2023-07-14 21:13:28
 @@ -832,11 +832,15 @@
              {
                  NRF_LOG_DEBUG("TWIM: Event: %s.\r\n", (uint32_t)EVT_TO_STR_TWIM(NRF_TWIM_EVENT_ERROR)); 
@@ -238,8 +238,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.c nrfSDK/compo
          {
  
 diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.h
---- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h	2017-05-05 14:10:54.000000000 -0700
-+++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.h	2022-08-15 17:22:54.000000000 -0700
+--- nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h	2017-05-05 14:10:54
++++ nrfSDK/components/drivers_nrf/twi_master/nrf_drv_twi.h	2023-07-14 21:13:28
 @@ -78,9 +78,9 @@
  
  #if defined(TWIM_IN_USE)
@@ -265,8 +265,8 @@ diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h nrfSDK/compo
      uint8_t drv_inst_idx; ///< Driver instance index.
      bool    use_easy_dma; ///< True if the peripheral with EasyDMA (TWIM) shall be used.
 diff -Naurb nrfSDK2/components/softdevice/s130/headers/nrf_svc.h nrfSDK/components/softdevice/s130/headers/nrf_svc.h
---- nrfSDK2/components/softdevice/s130/headers/nrf_svc.h	2016-04-20 15:57:06.000000000 -0700
-+++ nrfSDK/components/softdevice/s130/headers/nrf_svc.h	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/softdevice/s130/headers/nrf_svc.h	2016-04-20 15:57:06
++++ nrfSDK/components/softdevice/s130/headers/nrf_svc.h	2023-07-14 21:13:28
 @@ -52,7 +52,7 @@
  #define SVCALL(number, return_type, signature) return_type __svc(number) signature
  #elif defined (__GNUC__)
@@ -276,9 +276,21 @@ diff -Naurb nrfSDK2/components/softdevice/s130/headers/nrf_svc.h nrfSDK/componen
  #else
  #define GCC_CAST_CPP    
  #endif
+diff -Naurb nrfSDK2/components/softdevice/s132/headers/nrf_svc.h nrfSDK/components/softdevice/s132/headers/nrf_svc.h
+--- nrfSDK2/components/softdevice/s132/headers/nrf_svc.h	2017-05-05 13:10:30
++++ nrfSDK/components/softdevice/s132/headers/nrf_svc.h	2023-07-30 20:48:02
+@@ -52,7 +52,7 @@
+ #define SVCALL(number, return_type, signature) return_type __svc(number) signature
+ #elif defined (__GNUC__)
+ #ifdef __cplusplus
+-#define GCC_CAST_CPP (uint8_t)
++#define GCC_CAST_CPP (uint16_t)
+ #else
+ #define GCC_CAST_CPP
+ #endif
 diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.common nrfSDK/components/toolchain/gcc/Makefile.common
---- nrfSDK2/components/toolchain/gcc/Makefile.common	2017-05-05 13:10:30.000000000 -0700
-+++ nrfSDK/components/toolchain/gcc/Makefile.common	2022-07-16 19:09:28.000000000 -0700
+--- nrfSDK2/components/toolchain/gcc/Makefile.common	2017-05-05 13:10:30
++++ nrfSDK/components/toolchain/gcc/Makefile.common	2023-07-14 21:13:28
 @@ -108,7 +108,8 @@
  define define_target
  $(eval OUTPUT_FILE := $(OUTPUT_DIRECTORY)/$(strip $(1))) \
@@ -304,8 +316,8 @@ diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.common nrfSDK/components/t
  	$(NO_ECHO)$(SIZE) $@
  	-@echo ''
 diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.posix nrfSDK/components/toolchain/gcc/Makefile.posix
---- nrfSDK2/components/toolchain/gcc/Makefile.posix	2017-05-05 13:10:30.000000000 -0700
-+++ nrfSDK/components/toolchain/gcc/Makefile.posix	2022-04-27 00:50:11.000000000 -0700
+--- nrfSDK2/components/toolchain/gcc/Makefile.posix	2017-05-05 13:10:30
++++ nrfSDK/components/toolchain/gcc/Makefile.posix	2023-07-14 21:13:28
 @@ -1,3 +1,3 @@
 -GNU_INSTALL_ROOT := /usr/local/gcc-arm-none-eabi-4_9-2015q3
 -GNU_VERSION := 4.9.3
@@ -313,8 +325,8 @@ diff -Naurb nrfSDK2/components/toolchain/gcc/Makefile.posix nrfSDK/components/to
 +GNU_VERSION := 7.3.1
  GNU_PREFIX := arm-none-eabi
 diff -Naurb nrfSDK2/components/toolchain/gcc/nrf5x_common.ld nrfSDK/components/toolchain/gcc/nrf5x_common.ld
---- nrfSDK2/components/toolchain/gcc/nrf5x_common.ld	2017-05-05 13:10:52.000000000 -0700
-+++ nrfSDK/components/toolchain/gcc/nrf5x_common.ld	2022-09-11 01:46:34.000000000 -0700
+--- nrfSDK2/components/toolchain/gcc/nrf5x_common.ld	2017-05-05 13:10:52
++++ nrfSDK/components/toolchain/gcc/nrf5x_common.ld	2023-07-14 21:13:28
 @@ -87,10 +87,10 @@
      } > FLASH
      __exidx_end = .;

@@ -13,12 +13,14 @@ MRIBLUE_PATH := ../mriblue_boot/shared
 #$(OUTPUT_DIRECTORY)/Watch.out: \
 #  LINKER_SCRIPT  := $(MRIBLUE_PATH)/nrf52.ld
 $(OUTPUT_DIRECTORY)/Watch.out: \
-  LINKER_SCRIPT  := $(MRIBLUE_PATH)/../nrf52.ld
+  LINKER_SCRIPT  := nrf52.ld
 
 # Source files common to all targets
 SRC_FILES += \
   $(MRIBLUE_PATH)/newlib_retarget.c \
   $(PROJ_DIR)/main.cpp \
+  $(PROJ_DIR)/Adafruit-GFX-Library/Adafruit_GFX.cpp \
+  $(PROJ_DIR)/ColorMemLCD/ColorMemLCD.cpp \
   $(PROJ_DIR)/SAADCScanner/SAADCScanner.cpp \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_serial.c \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_frontend.c \
@@ -45,8 +47,29 @@ SRC_FILES += \
   $(SDK_ROOT)/components/libraries/simple_timer/app_simple_timer.c \
   $(SDK_ROOT)/components/toolchain/gcc/gcc_startup_nrf52840.S \
   $(SDK_ROOT)/components/drivers_nrf/hal/nrf_saadc.c \
+  $(SDK_ROOT)/components/ble/ble_db_discovery/ble_db_discovery.c \
+  $(SDK_ROOT)/components/ble/peer_manager/peer_manager.c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_bas_c/ble_bas_c.c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hrs_c/ble_hrs_c.c \
+  $(SDK_ROOT)/components/libraries/fstorage/fstorage.c \
+  $(SDK_ROOT)/components/ble/common/ble_conn_state.c \
+  $(SDK_ROOT)/components/ble/nrf_ble_gatt/nrf_ble_gatt.c \
+  $(SDK_ROOT)/components/libraries/fds/fds.c \
+  $(SDK_ROOT)/components/libraries/timer/app_timer.c \
+  $(SDK_ROOT)/components/ble/peer_manager/id_manager.c \
+  $(SDK_ROOT)/components/ble/peer_manager/security_manager.c \
+  $(SDK_ROOT)/components/ble/peer_manager/security_dispatcher.c \
+  $(SDK_ROOT)/components/ble/peer_manager/gatt_cache_manager.c \
+  $(SDK_ROOT)/components/ble/peer_manager/gatts_cache_manager.c \
+  $(SDK_ROOT)/components/ble/peer_manager/peer_data_storage.c \
+  $(SDK_ROOT)/components/ble/peer_manager/peer_database.c \
+  $(SDK_ROOT)/components/ble/peer_manager/peer_id.c \
+  $(SDK_ROOT)/components/ble/peer_manager/pm_buffer.c \
+  $(SDK_ROOT)/components/ble/peer_manager/pm_mutex.c \
+  $(SDK_ROOT)/components/drivers_nrf/pwm/nrf_drv_pwm.c \
 
-# UNDONE: Add the below back in to the above list before mani.c
+
+# UNDONE: Add the below back in to the above list before main.c
 #  $(MRIBLUE_PATH)/gcc_startup_nrf52840.S \
 
 # Add in MRI debug monitor to get the newlib stubs contained within.
@@ -57,6 +80,7 @@ INC_FOLDERS += \
   $(PROJ_DIR) \
   $(MRI_PATH) \
   $(MRIBLUE_PATH) \
+  $(PROJ_DIR)/Adafruit-GFX-Library \
   $(SDK_ROOT)/components/drivers_nrf/comp \
   $(SDK_ROOT)/components/drivers_nrf/twi_master \
   $(SDK_ROOT)/components/softdevice/s132/headers \
@@ -133,6 +157,12 @@ INC_FOLDERS += \
   $(SDK_ROOT)/components/softdevice/common/softdevice_handler \
   $(SDK_ROOT)/components/libraries/log/src \
   $(SDK_ROOT)/components/libraries/simple_timer \
+  $(SDK_ROOT)/components/ble/ble_db_discovery \
+  $(SDK_ROOT)/components/ble/common \
+  $(SDK_ROOT)/components/ble/peer_manager \
+  $(SDK_ROOT)/components/ble/ble_services/ble_hrs_c \
+  $(SDK_ROOT)/components/ble/ble_services/ble_bas_c \
+  $(SDK_ROOT)/components/ble/nrf_ble_gatt \
 
 # C flags common to all targets
 CFLAGS += -D__HEAP_SIZE=0
@@ -151,12 +181,21 @@ CFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
 # keep every function in separate section, this allows linker to discard unused ones
 CFLAGS += -ffunction-sections -fdata-sections -fno-strict-aliasing
 CFLAGS += -fno-builtin --short-enums
+CFLAGS += -DBLE_STACK_SUPPORT_REQD
+CFLAGS += -DNRF_SD_BLE_API_VERSION=3
+
+# Disable function cloning as it grows the code and explodes hardware breakpoint requirements.
+CFLAGS += -fno-ipa-cp-clone
 
 # Disabling inlining tends to make debugging easier.
 CFLAGS += -fno-inline
 
 # C++ flags common to all targets
 CXXFLAGS += -fno-rtti
+# Don't want exception handling enabled for embedded builds, to shrink size.
+CXXFLAGS += -fno-exceptions
+# Don't wrap function static object instantiation in guards since we are single threaded.
+CXXFLAGS += -fno-threadsafe-statics
 
 # Assembler flags common to all targets
 ASMFLAGS += -x assembler-with-cpp
@@ -171,6 +210,8 @@ ASMFLAGS += -DS132
 ASMFLAGS += -mcpu=cortex-m4
 ASMFLAGS += -mthumb -mabi=aapcs
 ASMFLAGS += -mfloat-abi=hard -mfpu=fpv4-sp-d16
+ASMFLAGS += -DBLE_STACK_SUPPORT_REQD
+ASMFLAGS += -DNRF_SD_BLE_API_VERSION=3
 
 # Linker flags
 LDFLAGS += -mthumb -mabi=aapcs -L $(TEMPLATE_PATH) -T$(LINKER_SCRIPT)
@@ -211,17 +252,17 @@ $(foreach target, $(TARGETS), $(call define_target, $(target)))
 # Flash the program
 flash: $(OUTPUT_DIRECTORY)/Watch.hex
 	@echo Flashing: $<
-	$(NRF_TOOL_PATH)/nrfjprog/nrfjprog --program $< -f nrf52 --sectorerase
-	$(NRF_TOOL_PATH)/nrfjprog/nrfjprog --reset -f nrf52
+	nrfjprog --program $< -f nrf52 --sectorerase
+	nrfjprog --reset -f nrf52
 
 # Flash softdevice
 flash_softdevice: erase
 	@echo Flashing: s132_nrf52_3.0.0_softdevice.hex
-	$(NRF_TOOL_PATH)/nrfjprog/nrfjprog --program $(SDK_ROOT)/components/softdevice/s132/hex/s132_nrf52_3.0.0_softdevice.hex -f nrf52 --sectorerase
-	$(NRF_TOOL_PATH)/nrfjprog/nrfjprog --reset -f nrf52
+	nrfjprog --program $(SDK_ROOT)/components/softdevice/s132/hex/s132_nrf52_3.0.0_softdevice.hex -f nrf52 --sectorerase
+	nrfjprog --reset -f nrf52
 
 erase:
-	$(NRF_TOOL_PATH)/nrfjprog/nrfjprog --eraseall -f nrf52
+	nrfjprog --eraseall -f nrf52
 
 
 SDK_VER := nRF5_SDK_12.3.0_d7731ad

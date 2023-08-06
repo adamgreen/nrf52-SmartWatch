@@ -6,9 +6,47 @@
 #ifdef USE_APP_CONFIG
 #include "app_config.h"
 #endif
+// <h> Application
+
+//==========================================================
+// <o> NRF_BLE_CENTRAL_LINK_COUNT - Number of central links
+#ifndef NRF_BLE_CENTRAL_LINK_COUNT
+#define NRF_BLE_CENTRAL_LINK_COUNT 1
+#endif
+
+// <o> NRF_BLE_PERIPHERAL_LINK_COUNT - Number of peripheral links
+#ifndef NRF_BLE_PERIPHERAL_LINK_COUNT
+#define NRF_BLE_PERIPHERAL_LINK_COUNT 0
+#endif
+
+// </h>
+//==========================================================
+
+
 // <h> nRF_BLE
 
 //==========================================================
+// <q> BLE_DB_DISCOVERY_ENABLED  - ble_db_discovery - Database discovery module
+
+
+#ifndef BLE_DB_DISCOVERY_ENABLED
+#define BLE_DB_DISCOVERY_ENABLED 1
+#endif
+
+// <e> NRF_BLE_GATT_ENABLED - nrf_ble_gatt - GATT module
+//==========================================================
+#ifndef NRF_BLE_GATT_ENABLED
+#define NRF_BLE_GATT_ENABLED 1
+#endif
+#if  NRF_BLE_GATT_ENABLED
+// <o> NRF_BLE_GATT_MAX_MTU_SIZE - Static maximum MTU size that is passed to the @ref sd_ble_enable function.
+#ifndef NRF_BLE_GATT_MAX_MTU_SIZE
+#define NRF_BLE_GATT_MAX_MTU_SIZE 158
+#endif
+
+#endif //NRF_BLE_GATT_ENABLED
+// </e>
+
 // <q> BLE_ADVERTISING_ENABLED  - ble_advertising - Advertising module
 
 
@@ -41,7 +79,7 @@
 
 
 #ifndef PEER_MANAGER_ENABLED
-#define PEER_MANAGER_ENABLED 0
+#define PEER_MANAGER_ENABLED 1
 #endif
 
 // </h>
@@ -68,7 +106,7 @@
 
 
 #ifndef BLE_BAS_C_ENABLED
-#define BLE_BAS_C_ENABLED 0
+#define BLE_BAS_C_ENABLED 1
 #endif
 
 // <q> BLE_BAS_ENABLED  - ble_bas - Battery Service
@@ -116,7 +154,7 @@
 // <e> BLE_HRS_C_ENABLED - ble_hrs_c - Heart Rate Service Client
 //==========================================================
 #ifndef BLE_HRS_C_ENABLED
-#define BLE_HRS_C_ENABLED 0
+#define BLE_HRS_C_ENABLED 1
 #endif
 #if  BLE_HRS_C_ENABLED
 // <o> BLE_HRS_C_RR_INTERVALS_MAX_CNT - Maximum number of RR_INTERVALS per notification to be decoded
@@ -187,7 +225,7 @@
 
 
 #ifndef BLE_NUS_ENABLED
-#define BLE_NUS_ENABLED 1
+#define BLE_NUS_ENABLED 0
 #endif
 
 // <q> BLE_RSCS_C_ENABLED  - ble_rscs_c - Running Speed and Cadence Client
@@ -648,7 +686,7 @@
 // <e> GPIOTE_ENABLED - nrf_drv_gpiote - GPIOTE peripheral driver
 //==========================================================
 #ifndef GPIOTE_ENABLED
-#define GPIOTE_ENABLED 0
+#define GPIOTE_ENABLED 1
 #endif
 #if  GPIOTE_ENABLED
 // <o> GPIOTE_CONFIG_NUM_OF_LOW_POWER_EVENTS - Number of lower power input pins
@@ -1343,7 +1381,7 @@
 // <e> PWM_ENABLED - nrf_drv_pwm - PWM peripheral driver
 //==========================================================
 #ifndef PWM_ENABLED
-#define PWM_ENABLED 0
+#define PWM_ENABLED 1
 #endif
 #if  PWM_ENABLED
 // <o> PWM_DEFAULT_CONFIG_OUT0_PIN - Out0 pin  <0-31>
@@ -1444,7 +1482,7 @@
 
 
 #ifndef PWM0_ENABLED
-#define PWM0_ENABLED 0
+#define PWM0_ENABLED 1
 #endif
 
 // <q> PWM1_ENABLED  - Enable PWM1 instance
@@ -2142,7 +2180,7 @@
 // <e> SPI_ENABLED - nrf_drv_spi - SPI/SPIM peripheral driver
 //==========================================================
 #ifndef SPI_ENABLED
-#define SPI_ENABLED 0
+#define SPI_ENABLED 1
 #endif
 #if  SPI_ENABLED
 // <o> SPI_DEFAULT_CONFIG_IRQ_PRIORITY  - Interrupt priority
@@ -2809,7 +2847,7 @@
 // <e> UART0_ENABLED - Enable UART0 instance
 //==========================================================
 #ifndef UART0_ENABLED
-#define UART0_ENABLED 1
+#define UART0_ENABLED 0
 #endif
 #if  UART0_ENABLED
 // <q> UART0_CONFIG_USE_EASY_DMA  - Default setting for using EasyDMA
@@ -3069,7 +3107,7 @@
 // <e> APP_TIMER_ENABLED - app_timer - Application timer functionality
 //==========================================================
 #ifndef APP_TIMER_ENABLED
-#define APP_TIMER_ENABLED 0
+#define APP_TIMER_ENABLED 1
 #endif
 #if  APP_TIMER_ENABLED
 // <q> APP_TIMER_WITH_PROFILER  - Enable app_timer profiling
@@ -3182,7 +3220,7 @@
 // <e> FDS_ENABLED - fds - Flash data storage module
 //==========================================================
 #ifndef FDS_ENABLED
-#define FDS_ENABLED 0
+#define FDS_ENABLED 1
 #endif
 #if  FDS_ENABLED
 // <o> FDS_OP_QUEUE_SIZE - Size of the internal queue.
@@ -3229,7 +3267,7 @@
 // <e> FSTORAGE_ENABLED - fstorage - Flash storage module
 //==========================================================
 #ifndef FSTORAGE_ENABLED
-#define FSTORAGE_ENABLED 0
+#define FSTORAGE_ENABLED 1
 #endif
 #if  FSTORAGE_ENABLED
 // <o> FS_QUEUE_SIZE - Configures the size of the internal queue.
