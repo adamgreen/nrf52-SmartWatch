@@ -3,10 +3,60 @@
 # Commands of Interest
 #   heapsize - Displays the current heap size.
 #   heapwalk - Walks the heap and dumps each chunk encountered.
+#   eraseall - Erases all of the FLASH and UICR on the nRF52 microcontrollers.
+#   dumplog - Dumps the g_logBuffer I used in my SmartWatch project.
 #
 # Issuing "help user-defined" command from within GDB will list the commands added by this script.
 #
 # Initially created by Adam Green - July 2023.
+
+
+
+# Command to dump the strings in the g_logBuffer on my SmartWatch project.
+define dumplog
+    set var $dumplog_write=(unsigned int)g_logWrite
+    set var $dumplog_size=(unsigned int)sizeof(g_logBuffer)
+    set var $dumplog_curr=$dumplog_write
+    set var $dumplog_primask=$primask
+    set var $primask=1
+    set pagination off
+
+    # The oldest logged character is either the next write location (if wrap has occurred) or offset 0.
+    # Find the first non-null character and start dumping strings from there.
+    if (g_logBuffer[$dumplog_write] != 0)
+        # Wrap around has occurred so next write location contains the oldest logged character.
+        set var $dumplog_curr=$dumplog_write
+    else
+        set var $dumplog_next=(($dumplog_curr + 1) % $dumplog_size)
+        if (g_logBuffer[$dumplog_next] != 0)
+            # Wrap around has occurred but next write location happened to have a NULL terminator from an older
+            # overwritten message.
+            set var $dumplog_curr=$dumplog_next
+        else
+            # No wrap around has occurred yet so offset 0 still contains the first message logged this session.
+            set var $dumplog_curr=0
+        end
+    end
+
+    # Dump each of the strings, starting with the oldest.
+    while (1)
+        # Dump the current string.
+        printf "%s", &g_logBuffer[$dumplog_curr]
+        # Advance past the NULL terminator for this string, wrapping around if necessary.
+        set var $dumplog_curr=(($dumplog_curr + (int)strlen(&g_logBuffer[$dumplog_curr]) + 1) % $dumplog_size)
+        # Check for end of dump here.
+        if ($dumplog_curr == $dumplog_write)
+            loop_break
+        end
+    end
+    set var $primask=$dumplog_primask
+    set pagination on
+end
+
+document dumplog
+Dumps the strings found in the g_logBuffer circular buffer of my SmartWatch project.
+end
+
 
 
 

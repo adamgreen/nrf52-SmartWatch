@@ -79,6 +79,7 @@ class ColorMemLCD : public Adafruit_GFX
         {
             while (isRefreshInProgress())
             {
+                __WFE();
             }
         }
 

@@ -297,9 +297,6 @@ void ColorMemLCD::refresh(bool block /* = true */)
         return;
     }
 
-    // Make sure that previous refresh() has completed before starting this one.
-    waitForRefreshToComplete();
-
     // Send the dirty lines to the LCD via SPI.
     // The M and AG header bits were pre-populated in the constructor.
     uint8_t* pStart = &m_buffer[m_minDirtyRow * ROW_SPAN];
@@ -317,6 +314,9 @@ void ColorMemLCD::sendCommandBuffer(const uint8_t* pBuffer, size_t bufferLength,
     // Pull the SCS (chip select) pin high. It will be pulled low in handleSpiEvent() once transaction has completed.
     nrf_gpio_pin_set(m_scsPin);
     nrf_delay_us(6);
+
+    // Make sure that previous transfer has completed before starting this one.
+    waitForRefreshToComplete();
 
     m_inProgress = true;
     uint32_t errorCode = nrf_drv_spi_transfer(m_pSpi, pBuffer, bufferLength, NULL, 0);

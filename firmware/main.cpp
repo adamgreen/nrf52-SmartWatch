@@ -15,6 +15,7 @@
 #include <nrf_assert.h>
 #include <nrf_delay.h>
 #include <nrf_drv_gpiote.h>
+#include <nrf_atomic.h>
 #include <ble.h>
 #include <ble_conn_state.h>
 #include <ble_db_discovery.h>
@@ -65,6 +66,13 @@ static const uint8_t BUTTON_PIN = 17;
 #define APP_TIMER_PRESCALER             0
 // Size of timer operation queues.
 #define APP_TIMER_OP_QUEUE_SIZE         2
+
+// Sample the watch battery once a minute.
+#define BATTERY_READ_TICKS              APP_TIMER_TICKS(60000u, APP_TIMER_PRESCALER)
+
+// Debounce the right side watch button by ignoring subsequent presses for 500ms.
+#define BUTTON_DEBOUNCE_TICKS           APP_TIMER_TICKS(500U, APP_TIMER_PRESCALER)
+
 
 // Security GAP parameters.
 // Perform bonding.
@@ -127,7 +135,7 @@ typedef struct
 static SAADCScanner         g_adc(NRF_SAADC_RESOLUTION_12BIT, false, _PRIO_APP_LOWEST);
 
 // Battery voltage is read using this ADC channel.
-SAADCScanner::Channel* g_pBatteryVoltageChannel = NULL;
+SAADCScanner::Channel*      g_pBatteryVoltageChannel = NULL;
 
 // LCD display.
 static const nrf_drv_spi_t  g_lcdSpiInstance = NRF_DRV_SPI_INSTANCE(LCD_SPI_INSTANCE);
@@ -136,9 +144,19 @@ ColorMemLCD                 g_lcd(&g_lcdSpiInstance, &g_lcdPwmInstance,
                                   LCD_SCLK_PIN, LCD_SI_PIN, LCD_SCS_PIN,
                                   LCD_EXTCOMIN_PIN, LCD_DISP_PIN, LCD_BACKLIGHT_PIN);
 
+// This counter is incremented each time a UI component is update and the screen should be updated.
+static volatile uint32_t    g_uiUpdates = 1;
+
 // Globals used to communicate state between Heart Rate Monitor (hrm) and main loop.
+static volatile uint16_t    g_hrmConnectionHandle = BLE_CONN_HANDLE_INVALID;
 static volatile bool        g_isHrmConnected = false;
 static volatile uint32_t    g_heartRate = 0;
+
+// Latest watch battery voltage.
+static volatile float       g_watchBatteryVoltage = 0.0f;
+
+// Latest heart rate monitor voltage level (%).
+static volatile uint8_t     g_hrmBatteryLevel = 0;
 
 // Global BLE modules.
 static ble_db_discovery_t   g_bleDbDiscovery;
@@ -154,6 +172,12 @@ static bool                 g_isFlashAccessInProgress;
 // If first call to ble_db_discovery_start() fails when connection is first made, then retry it later.
 static bool                 g_retryDbDiscovery;
 static uint16_t             g_bleConnectionToRetryDbDiscovery = BLE_CONN_HANDLE_INVALID;
+
+// App Timer Instances.
+// Timer used to sample the watch battery on a regular basis.
+APP_TIMER_DEF(g_batteryReadTimer);
+// Timer used to debounce watch button presses.
+APP_TIMER_DEF(g_buttonDebounceTimer);
 
 // Connection timing parameters requested for BLE connection.
 static const ble_gap_conn_params_t g_bleConnectionParameters =
@@ -189,17 +213,25 @@ static const ble_gap_addr_t g_targetPeripheralAddress =
 
 
 // UNDONE: Temporary debug log output queue.
-static char              g_logBuffer[32*1024];
+static char              g_logBuffer[4096+1];
 volatile static uint32_t g_logWrite = 0;
 
 static int logPrintF(const char* pFormat, ...)
 {
+    // Reserve the last byte in the buffer to always be a NULL terminator when dumping the strings later.
+    const size_t qSize = sizeof(g_logBuffer) - 1;
     // First see how many bytes are needed for this printf() call.
     va_list vaList;
     va_start(vaList, pFormat);
     int bytesNeeded = vsnprintf(NULL, 0, pFormat, vaList);
     va_end(vaList);
     ASSERT ( bytesNeeded >= 0 );
+
+    // Just return immediately if the result of the printf() call is an empty string.
+    if (bytesNeeded == 0)
+    {
+        return 0;
+    }
 
     // Attempt to allocate enough bytes for this data in g_logBuffer using interlocked operations so that logging can
     // happen from multiple interrupt priorities at once.
@@ -211,7 +243,7 @@ static int logPrintF(const char* pFormat, ...)
     do
     {
         writeIndex = __LDREXW(&g_logWrite);
-        newIndex = (writeIndex + bytesNeeded) % sizeof(g_logBuffer);
+        newIndex = (writeIndex + bytesNeeded) % qSize;
         storeFailed = __STREXW(newIndex, &g_logWrite);
     } while (storeFailed);
 
@@ -230,15 +262,15 @@ static int logPrintF(const char* pFormat, ...)
         // over byte by byte.
         char buffer[bytesNeeded];
         va_start(vaList, pFormat);
-        int bytesUsed = vsnprintf(buffer, bytesNeeded, pFormat, vaList);
+        int bytesUsed = vsnprintf(buffer, bytesNeeded, pFormat, vaList) + 1;
         va_end(vaList);
-        ASSERT ( bytesUsed == bytesNeeded-1 );
+        ASSERT ( bytesUsed == bytesNeeded );
 
         char* pCurr = &buffer[0];
         while (bytesUsed > 0)
         {
             g_logBuffer[writeIndex] = *pCurr++;
-            writeIndex = (writeIndex + 1) % sizeof(g_logBuffer);
+            writeIndex = (writeIndex + 1) % qSize;
             bytesUsed--;
         }
         ASSERT ( writeIndex == newIndex );
@@ -269,49 +301,6 @@ static void sleep_mode_enter(void)
     errorCode = sd_power_system_off();
     APP_ERROR_CHECK(errorCode);
 }
-
-/**@brief Function for disabling the use of whitelist for scanning.
- */
-static void whitelist_disable(void)
-{
-    if (!g_isWhitelistDisabled)
-    {
-        logPrintF("Whitelist temporarily disabled.\n");
-        g_isWhitelistDisabled = true;
-        (void) sd_ble_gap_scan_stop();
-        startScanningForHeartRateMonitor();
-    }
-}
-
-/**@brief Function for handling events from the BSP module.
- *
- * @param[in]   event   Event generated by button press.
- */
-void bsp_event_handler(bsp_event_t event)
-{
-    uint32_t errorCode;
-    switch (event)
-    {
-        case BSP_EVENT_SLEEP:
-            sleep_mode_enter();
-            break;
-
-        case BSP_EVENT_DISCONNECT:
-            errorCode = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-            if (errorCode != NRF_ERROR_INVALID_STATE)
-            {
-                APP_ERROR_CHECK(errorCode);
-            }
-            break;
-
-        case BSP_EVENT_WHITELIST_OFF:
-            whitelist_disable();
-            break;
-
-        default:
-            break;
-    }
-}
 #endif // UNDONE
 
 
@@ -320,10 +309,10 @@ void bsp_event_handler(bsp_event_t event)
 
 // Forward Function Declarations
 static void initLCD();
-static void initBatteryVoltageReading();
-static float readBatteryVoltage();
-static void initButtonInterrupt();
-static void handleButtonPress(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action);
+static void initTimers();
+static void handleBatteryTimer(void* pvContext);
+static void handleButtonDebounceTimer(void* pvContext);
+static void initBleStack();
 static void initBLE(void);
 static void dispatchBleEvents(ble_evt_t* pBleEvent);
 static void handleBleEvent(ble_evt_t* pBleEvent);
@@ -345,6 +334,14 @@ static void initHeartRateService();
 static void handleHeartRateServiceEvent(ble_hrs_c_t* pHeartRate, ble_hrs_c_evt_t* pHeartRateEvent);
 static void initBatteryService();
 static void handleBatteryServiceEvent(ble_bas_c_t * pBatteryService, ble_bas_c_evt_t * pBatteryServiceEvent);
+static void initBatteryVoltageReading();
+static float readBatteryVoltage();
+static void initButtonInterrupt();
+static void handleButtonPress(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action);
+static void stopBLE();
+static void startBLE();
+static void startTimers();
+static void stopTimers();
 static void startScanningForHeartRateMonitor();
 static void loadWhitelist();
 static void getPeerList(pm_peer_id_t* pPeers, uint32_t* peerCount);
@@ -357,34 +354,17 @@ int main(void)
     logPrintF("Starting up...\n");
 
     initLCD();
+    initTimers();
+    initBleStack();
     initBatteryVoltageReading();
     initButtonInterrupt();
-
-    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, NULL);
-    initBLE();
-
-    // UNDONE: Need way do this on the watch itself.
-    bool eraseBonds = false;
-    initPeerManager(eraseBonds);
-    if (eraseBonds == true)
-    {
-        logPrintF("Bonds erased!\n");
-    }
-
-    initGATT();
-    initDbDiscoveryModule();
-    initHeartRateService();
-    initBatteryService();
-
-    // UNDONE: Move into a timer.
-    nrf_delay_ms(1);
-    float batteryVoltage = readBatteryVoltage();
-    logPrintF("Vbatt=%.1f\n", batteryVoltage + 0.05f);
+    startTimers();
 
     // Start scanning for peripherals and initiate connection with devices that advertise Heart Rate UUID.
     logPrintF("Heart Rate Example.\n");
     startScanningForHeartRateMonitor();
 
+    // Main UI Loop.
     for (;;)
     {
         sleepUntilNextEvent();
@@ -399,66 +379,49 @@ static void initLCD()
     g_lcd.setTextSize(2);
 }
 
-static void initBatteryVoltageReading()
+static void initTimers()
 {
-    // Initialize the ADC object which scans all of the configured ADC channels manually.
-    bool result = g_adc.init();
-    ASSERT ( result );
-    g_pBatteryVoltageChannel = g_adc.addChannel(BATTERY_VOLTAGE_PIN,
-                                                NRF_SAADC_RESISTOR_DISABLED,
-                                                NRF_SAADC_GAIN1_4,
-                                                NRF_SAADC_REFERENCE_VDD4,
-                                                NRF_SAADC_ACQTIME_3US,
-                                                SAADC_LOWER_LIMIT_DISABLED,
-                                                SAADC_UPPER_LIMIT_DISABLED,
-                                                NULL);
-    ASSERT ( g_pBatteryVoltageChannel != NULL );
-    g_adc.startScanning();
-}
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, NULL);
 
-static float readBatteryVoltage()
-{
-    // Read the battery voltage.
-    ASSERT ( g_pBatteryVoltageChannel->getSampleCount() > 0 );
-    SAADCScanner::Channel::Reading reading = g_pBatteryVoltageChannel->read();
-    float batteryVoltage = 3.3f * 4.0f * reading.mean / 4095.0f;
-
-    // Kick off the next ADC sampling cycle so that the sample is ready by the time it is needed.
-    g_adc.startScanning();
-
-    return batteryVoltage;
-}
-
-static void initButtonInterrupt()
-{
-    // Configure button on right side of watch to generate interrupt when it is pressed.
-    nrf_drv_gpiote_in_config_t gpioteConfig =
-    {
-        .sense = NRF_GPIOTE_POLARITY_HITOLO,
-        .pull = NRF_GPIO_PIN_PULLUP,
-        .is_watcher = false,
-        .hi_accuracy = false
-    };
-    uint32_t errorCode = nrf_drv_gpiote_init();
+    // Create the timer used to read the watch battery voltage on a regular basis.
+    ret_code_t errorCode = app_timer_create(&g_batteryReadTimer, APP_TIMER_MODE_REPEATED, handleBatteryTimer);
     APP_ERROR_CHECK(errorCode);
 
-    errorCode = nrf_drv_gpiote_in_init(BUTTON_PIN, &gpioteConfig, handleButtonPress);
+    // Create the timer used to debounce watch button presses by ignoring subsequent presses for some time before
+    // re-enabling button press interrupts.
+    errorCode = app_timer_create(&g_buttonDebounceTimer, APP_TIMER_MODE_SINGLE_SHOT, handleButtonDebounceTimer);
     APP_ERROR_CHECK(errorCode);
+}
 
+static void handleBatteryTimer(void* pvContext)
+{
+    g_watchBatteryVoltage = readBatteryVoltage();
+    nrf_atomic_u32_add(&g_uiUpdates, 1);
+    logPrintF("Vbatt=%.1f\n", g_watchBatteryVoltage + 0.05f);
+}
+
+static void handleButtonDebounceTimer(void* pvContext)
+{
+    // Re-enable the GPIOTE interrupt for button presses.
     nrf_drv_gpiote_in_event_enable(BUTTON_PIN, true);
 }
 
-static void handleButtonPress(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
+static void initBleStack()
 {
-    // UNDONE: Should probably debounce this.
-    if (g_lcd.isOn())
+    initBLE();
+
+    // UNDONE: Need way do this on the watch itself.
+    bool eraseBonds = false;
+    initPeerManager(eraseBonds);
+    if (eraseBonds == true)
     {
-        g_lcd.turnOff();
+        logPrintF("Bonds erased!\n");
     }
-    else
-    {
-        g_lcd.turnOn();
-    }
+
+    initGATT();
+    initDbDiscoveryModule();
+    initHeartRateService();
+    initBatteryService();
 }
 
 static void initBLE()
@@ -519,6 +482,7 @@ static void handleBleEvent(ble_evt_t* pBleEvent)
         case BLE_GAP_EVT_CONNECTED:
         {
             logPrintF("Connected.\n");
+            g_hrmConnectionHandle = pBleEvent->evt.gap_evt.conn_handle;
 
             // Discover services supported by this peripheral.
             g_bleConnectionToRetryDbDiscovery = pBleEvent->evt.gap_evt.conn_handle;
@@ -611,6 +575,8 @@ static void handleBleEvent(ble_evt_t* pBleEvent)
             logPrintF("Disconnected, reason 0x%x.\n",
                          pBleEvent->evt.gap_evt.params.disconnected.reason);
             g_isHrmConnected = false;
+            nrf_atomic_u32_add(&g_uiUpdates, 1);
+            g_hrmConnectionHandle = BLE_CONN_HANDLE_INVALID;
 #ifdef UNDONE
             errorCode = bsp_indication_set(BSP_INDICATE_IDLE);
             APP_ERROR_CHECK(errorCode);
@@ -620,7 +586,8 @@ static void handleBleEvent(ble_evt_t* pBleEvent)
             memset(&g_bleDbDiscovery, 0 , sizeof (g_bleDbDiscovery));
 
             // Can start scanning for a new device to connect to now that this one has disconnected.
-            if (ble_conn_state_n_centrals() < NRF_BLE_CENTRAL_LINK_COUNT)
+            // Only start scanning if the LCD is on though.
+            if (g_lcd.isOn() && ble_conn_state_n_centrals() < NRF_BLE_CENTRAL_LINK_COUNT)
             {
                 startScanningForHeartRateMonitor();
             }
@@ -1025,6 +992,7 @@ static void handleHeartRateServiceEvent(ble_hrs_c_t* pHeartRate, ble_hrs_c_evt_t
             // Save away this most recent heart rate measurement.
             g_isHrmConnected = true;
             g_heartRate = pHeartRateEvent->params.hrm.hr_value;
+            nrf_atomic_u32_add(&g_uiUpdates, 1);
             logPrintF("Heart Rate = %d.\n", pHeartRateEvent->params.hrm.hr_value);
             for (int i = 0; i < pHeartRateEvent->params.hrm.rr_intervals_cnt; i++)
             {
@@ -1080,15 +1048,127 @@ static void handleBatteryServiceEvent(ble_bas_c_t* pBatteryService, ble_bas_c_ev
 
         case BLE_BAS_C_EVT_BATT_NOTIFICATION:
             logPrintF("Battery Level received %d %%.\n", pBatteryServiceEvent->params.battery_level);
+            g_hrmBatteryLevel = pBatteryServiceEvent->params.battery_level;
+            nrf_atomic_u32_add(&g_uiUpdates, 1);
             break;
 
         case BLE_BAS_C_EVT_BATT_READ_RESP:
             logPrintF("Battery Level Read as %d %%.\n", pBatteryServiceEvent->params.battery_level);
+            g_hrmBatteryLevel = pBatteryServiceEvent->params.battery_level;
+            nrf_atomic_u32_add(&g_uiUpdates, 1);
             break;
 
         default:
             break;
     }
+}
+
+static void initBatteryVoltageReading()
+{
+    // Initialize the ADC object which scans all of the configured ADC channels manually.
+    bool result = g_adc.init();
+    ASSERT ( result );
+    g_pBatteryVoltageChannel = g_adc.addChannel(BATTERY_VOLTAGE_PIN,
+                                                NRF_SAADC_RESISTOR_DISABLED,
+                                                NRF_SAADC_GAIN1_4,
+                                                NRF_SAADC_REFERENCE_VDD4,
+                                                NRF_SAADC_ACQTIME_3US,
+                                                SAADC_LOWER_LIMIT_DISABLED,
+                                                SAADC_UPPER_LIMIT_DISABLED,
+                                                NULL);
+    ASSERT ( g_pBatteryVoltageChannel != NULL );
+    g_adc.startScanning();
+}
+
+static float readBatteryVoltage()
+{
+    // Read the battery voltage.
+    ASSERT ( g_pBatteryVoltageChannel->getSampleCount() > 0 );
+    SAADCScanner::Channel::Reading reading = g_pBatteryVoltageChannel->read();
+    float batteryVoltage = 3.3f * 4.0f * reading.mean / 4095.0f;
+
+    // Kick off the next ADC sampling cycle so that the sample is ready by the time it is needed.
+    g_adc.startScanning();
+
+    return batteryVoltage;
+}
+
+static void initButtonInterrupt()
+{
+    // Configure button on right side of watch to generate interrupt when it is pressed.
+    nrf_drv_gpiote_in_config_t gpioteConfig =
+    {
+        .sense = NRF_GPIOTE_POLARITY_HITOLO,
+        .pull = NRF_GPIO_PIN_PULLUP,
+        .is_watcher = false,
+        .hi_accuracy = false
+    };
+    uint32_t errorCode = nrf_drv_gpiote_init();
+    APP_ERROR_CHECK(errorCode);
+
+    errorCode = nrf_drv_gpiote_in_init(BUTTON_PIN, &gpioteConfig, handleButtonPress);
+    APP_ERROR_CHECK(errorCode);
+
+    nrf_drv_gpiote_in_event_enable(BUTTON_PIN, true);
+}
+
+static void handleButtonPress(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
+{
+    // Disable the button sensing and re-enable it from a timer later.
+    nrf_drv_gpiote_in_event_disable(BUTTON_PIN);
+    ret_code_t errorCode = app_timer_start(g_buttonDebounceTimer, BUTTON_DEBOUNCE_TICKS, NULL);
+    APP_ERROR_CHECK(errorCode);
+
+    if (g_lcd.isOn())
+    {
+        g_lcd.turnOff();
+        stopTimers();
+        stopBLE();
+    }
+    else
+    {
+        g_lcd.turnOn();
+        nrf_atomic_u32_add(&g_uiUpdates, 1);
+        startBLE();
+        startTimers();
+    }
+}
+
+static void stopBLE()
+{
+    // User has asked for Watch to be turned off so stop BLE activity (connection or scanning).
+    if (g_hrmConnectionHandle != BLE_CONN_HANDLE_INVALID)
+    {
+        // Are currently connected to the heart rate monitor so disconnect from it.
+        // Normally the disconnect message would later cause the next scan to start but this has been disabled if
+        // the LCD is turned off.
+        (void) sd_ble_gap_disconnect(g_hrmConnectionHandle,  BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+    }
+    else
+    {
+        // Hadn't found heart rate monitor yet so just stop scanning for it.
+        (void) sd_ble_gap_scan_stop();
+    }
+}
+
+static void startBLE()
+{
+    // User has asked for Watch to be turned back on.
+    startScanningForHeartRateMonitor();
+}
+
+static void startTimers()
+{
+    // Perform initial watch battery voltage read now and then start timer to perform it in the future.
+    handleBatteryTimer(NULL);
+    ret_code_t errorCode = app_timer_start(g_batteryReadTimer, BATTERY_READ_TICKS, NULL);
+    APP_ERROR_CHECK(errorCode);
+}
+
+static void stopTimers()
+{
+    ret_code_t errorCode = app_timer_stop(g_batteryReadTimer);
+    APP_ERROR_CHECK(errorCode);
 }
 
 static void startScanningForHeartRateMonitor()
@@ -1224,19 +1304,43 @@ static void sleepUntilNextEvent()
 
 static void updateLCD()
 {
+    static uint32_t lastUiUpdate = 0;
+
+    // Only want to send updates to LCD if something has changed and the LCD is on.
+    uint32_t currUiUpdate = g_uiUpdates;
+    if (!g_lcd.isOn() || currUiUpdate == lastUiUpdate)
+    {
+        return;
+    }
+
+    // Prepare the LCD frame buffer for updating.
+    lastUiUpdate = currUiUpdate;
     g_lcd.waitForRefreshToComplete();
-    g_lcd.clearDisplay();
+    g_lcd.cls(ColorMemLCD::COLOR_BLACK);
+
+    // Output watch battery voltage.
+    g_lcd.setTextSize(1);
+    g_lcd.setCursor(150, 5);
+    g_lcd.printf("%3.1fV", g_watchBatteryVoltage + 0.05f);
+
+    // Output BLE connection state or latest heart rate measurement.
     g_lcd.setTextSize(5);
     g_lcd.setCursor(50, 60);
-
     if (g_isHrmConnected)
     {
+        // Display the latest heart rate measurement.
         g_lcd.printf("%u", g_heartRate);
+
+        // Display the heart rate monitor battery level.
+        g_lcd.setTextSize(1);
+        g_lcd.setCursor(150, 80);
+        g_lcd.printf("%u%%", g_hrmBatteryLevel);
     }
     else
     {
         g_lcd.printf("N/C");
     }
+
     g_lcd.refresh();
 }
 

@@ -264,6 +264,54 @@ diff -Naurb nrfSDK2/components/drivers_nrf/twi_master/nrf_drv_twi.h nrfSDK/compo
      } reg;
      uint8_t drv_inst_idx; ///< Driver instance index.
      bool    use_easy_dma; ///< True if the peripheral with EasyDMA (TWIM) shall be used.
+diff -Naurb nrfSDK2/components/libraries/timer/app_timer.c nrfSDK/components/libraries/timer/app_timer.c
+--- nrfSDK2/components/libraries/timer/app_timer.c	2017-05-05 14:10:54
++++ nrfSDK/components/libraries/timer/app_timer.c	2023-08-08 14:37:16
+@@ -139,7 +139,6 @@
+ static uint8_t                       m_ticks_elapsed_q_write_ind;               /**< Timer internal elapsed ticks queue write index. */
+ static app_timer_evt_schedule_func_t m_evt_schedule_func;                       /**< Pointer to function for propagating timeout events to the scheduler. */
+ static bool                          m_rtc1_running;                            /**< Boolean indicating if RTC1 is running. */
+-static bool                          m_rtc1_reset;                              /**< Boolean indicating if RTC1 counter has been reset due to last timer removed from timer list during the timer list handling. */
+ 
+ #if APP_TIMER_WITH_PROFILER
+ static uint8_t                       m_max_user_op_queue_utilization;           /**< Maximum observed timer user operations queue utilization. */
+@@ -308,12 +307,11 @@
+     {
+         mp_timer_id_head = mp_timer_id_head->next;
+ 
+-        // No more timers in the list. Reset RTC1 in case Start timer operations are present in the queue.
++        // No more timers in the list. Mark this last one as though it just had expired by pulling m_ticks_latest
++        // ahead to current count.
+         if (mp_timer_id_head == NULL)
+         {
+-            NRF_RTC1->TASKS_CLEAR = 1;
+-            m_ticks_latest        = 0;
+-            m_rtc1_reset          = true;
++            m_ticks_latest = rtc1_counter_get();
+         }
+     }
+ 
+@@ -617,12 +615,7 @@
+             p_timer->ticks_first_interval    = p_user_op->params.start.ticks_first_interval;
+             p_timer->ticks_periodic_interval = p_user_op->params.start.ticks_periodic_interval;
+             p_timer->p_context               = p_user_op->params.start.p_context;
+-
+-            if (m_rtc1_reset)
+-            {
+-                p_timer->ticks_at_start = 0;
+             }
+-        }
+ 
+         // Prepare the node to be inserted.
+         if (
+@@ -767,7 +760,6 @@
+     {
+         compare_reg_update(p_timer_id_head_old);
+     }
+-    m_rtc1_reset = false;
+ }
+ 
+ 
 diff -Naurb nrfSDK2/components/softdevice/s130/headers/nrf_svc.h nrfSDK/components/softdevice/s130/headers/nrf_svc.h
 --- nrfSDK2/components/softdevice/s130/headers/nrf_svc.h	2016-04-20 15:57:06
 +++ nrfSDK/components/softdevice/s130/headers/nrf_svc.h	2023-07-14 21:13:28
