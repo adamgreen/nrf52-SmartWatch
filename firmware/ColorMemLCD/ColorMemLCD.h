@@ -83,6 +83,11 @@ class ColorMemLCD : public Adafruit_GFX
             }
         }
 
+        virtual void drawChar(int16_t x, int16_t y, unsigned char c,
+                              uint16_t color, uint16_t bg,
+                              uint8_t size_x, uint8_t size_y);
+
+
     protected:
         static const int32_t BITS_PER_PIXEL = 3;
         static const int32_t BITS_PER_BYTE = 8;

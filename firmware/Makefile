@@ -22,6 +22,7 @@ SRC_FILES += \
   $(PROJ_DIR)/Adafruit-GFX-Library/Adafruit_GFX.cpp \
   $(PROJ_DIR)/ColorMemLCD/ColorMemLCD.cpp \
   $(PROJ_DIR)/SAADCScanner/SAADCScanner.cpp \
+  $(PROJ_DIR)/BufferLog/BufferLog.cpp \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_backend_serial.c \
   $(SDK_ROOT)/components/libraries/log/src/nrf_log_frontend.c \
   $(SDK_ROOT)/components/libraries/util/app_error.c \
