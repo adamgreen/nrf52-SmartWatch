@@ -107,7 +107,6 @@ void ColorMemLCD::init()
     APP_ERROR_CHECK(errorCode);
 
     clearDisplay();
-    turnOn();
 }
 
 void ColorMemLCD::staticHandleSpiEvent(nrf_drv_spi_evt_t const * pEvent)

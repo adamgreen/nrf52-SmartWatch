@@ -110,6 +110,11 @@ extern "C" void SAADC_IRQHandler(void)
     {
         g_pThis->startScanning();
     }
+    else
+    {
+        nrf_saadc_event_clear(NRF_SAADC_EVENT_STOPPED);
+        nrf_saadc_task_trigger(NRF_SAADC_TASK_STOP);
+    }
 }
 
 

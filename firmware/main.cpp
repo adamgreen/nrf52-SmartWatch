@@ -48,6 +48,27 @@ static const uint8_t LCD_BACKLIGHT_PIN = 8;
 // Bangle.js2 connection to the single button on the right side of the watch.
 static const uint8_t BUTTON_PIN = 17;
 
+
+// UNDONE: These are my mappings for running the code on the nRF52840 DK.
+#ifdef UNDONE
+// Bangle.js2 analog battery voltage is connected to this pin through a 1/4 resistor divider.
+static const uint8_t BATTERY_VOLTAGE_PIN = 3;
+// Bangle.js2 connections to the transreflective LCD display.
+static const uint8_t LCD_SCLK_PIN = 26;
+static const uint8_t LCD_SI_PIN = 27;
+static const uint8_t LCD_SCS_PIN = 28;
+static const uint8_t LCD_EXTCOMIN_PIN = 29;
+static const uint8_t LCD_DISP_PIN = 30;
+static const uint8_t LCD_BACKLIGHT_PIN = 31;
+// Bangle.js2 connection to the single button on the right side of the watch.
+static const uint8_t BUTTON_PIN = 11;
+#endif // UNDONE
+
+
+// The Bangle.js2 has required passives for enabling the lower power DC to DC converter.
+#define WATCH_HAS_DCDC_PASSIVES true
+
+
 // The SPIM peripheral instance to use for communicating with the LCD. Note that SPIM instances share the same
 // resources as TWI (I2C).
 #define LCD_SPI_INSTANCE    0
@@ -278,6 +299,8 @@ static void startScanningForHeartRateMonitor();
 static void loadWhitelist();
 static void getPeerList(pm_peer_id_t* pPeers, uint32_t* peerCount);
 static void sleepUntilNextEvent();
+static void clearPendingFpuExceptions();
+static void checkForErroneousPendingInterrupts();
 static void updateLCD();
 
 
@@ -390,6 +413,18 @@ static void initBLE()
     // Register with the SoftDevice handler module for System events.
     errorCode = softdevice_sys_evt_handler_set(dispatchSysEvents);
     APP_ERROR_CHECK(errorCode);
+
+    // For now it is ok to have a longer latency out of sleep mode so enable low power sleep mode.
+    sd_power_mode_set(NRF_POWER_MODE_LOWPWR);
+    APP_ERROR_CHECK(errorCode);
+
+    // Enable the DC to DC converter if possible as it reduced current consumption. Requires external components that
+    // the Bangle.js2 has installed.
+    if (WATCH_HAS_DCDC_PASSIVES)
+    {
+        errorCode = sd_power_dcdc_mode_set(NRF_POWER_DCDC_ENABLE);
+        APP_ERROR_CHECK(errorCode);
+    }
 }
 
 static void dispatchBleEvents(ble_evt_t* pBleEvent)
@@ -1230,8 +1265,36 @@ static void getPeerList(pm_peer_id_t* pPeers, uint32_t* peerCount)
 
 static void sleepUntilNextEvent()
 {
+    clearPendingFpuExceptions();
+
     uint32_t errorCode = sd_app_evt_wait();
     APP_ERROR_CHECK(errorCode);
+
+    checkForErroneousPendingInterrupts();
+}
+
+static void clearPendingFpuExceptions()
+{
+    uint32_t fpscr = __get_FPSCR();
+    __set_FPSCR(fpscr & ~0x9Fu);
+    __DMB();
+    NVIC_ClearPendingIRQ(FPU_IRQn);
+
+    // Assert if a critical FPU exception is signaled.
+    ASSERT((fpscr & 0x03) == 0);
+}
+
+static void checkForErroneousPendingInterrupts()
+{
+    // Are there random interrupts pending that are masked off but sd_app_evt_wait() thinks are important to app so
+    // won't put device to sleep properly.
+    const uint32_t interruptsUsedBySoftDevice = 0x4300f903;
+    uint32_t ISPR0 = NVIC->ISPR[0] & ~interruptsUsedBySoftDevice;
+    uint32_t ISPR1 = NVIC->ISPR[1] & ~(1 << (FPU_IRQn-32));
+    if (ISPR0 || ISPR1)
+    {
+        __debugbreak();
+    }
 }
 
 static void updateLCD()
