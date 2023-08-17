@@ -498,7 +498,7 @@ void ColorMemLCD::drawChar(int16_t x, int16_t y, unsigned char c,
                                          color);
                         }
                     }
-                    else if ((right & 0b11) == 0b10)
+                    if ((right & 0b11) == 0b10)
                     {
                         fillTriangle(x + (i + 1) * size_x - 1, y + j * size_y,
                                      x + (i + 1) * size_x - 1, y + (j + 1) * size_y,
