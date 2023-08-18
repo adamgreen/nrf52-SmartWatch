@@ -1120,6 +1120,12 @@ void Adafruit_GFX::drawChar(int16_t x, int16_t y, unsigned char c,
     if (!_cp437 && (c >= 176))
       c++; // Handle 'classic' charset behavior
 
+    if (size_x > 1 && size_y > 1 && color == bg) {
+        // Use the method which smooths the default font when scaled up.
+        Adafruit_GFX::drawSmoothChar(x, y, c, color, bg, size_x, size_y);
+        return;
+    }
+
     startWrite();
     for (int8_t i = 0; i < 5; i++) { // Char bitmap = 5 columns
       uint8_t line = pgm_read_byte(&font[c * 5 + i]);
@@ -1942,4 +1948,306 @@ void GFXcanvas16::byteSwap(void) {
     for (i = 0; i < pixels; i++)
       buffer[i] = __builtin_bswap16(buffer[i]);
   }
+}
+
+
+
+
+
+
+// *********************************************************************************************************************
+// Glyph Hinting
+// Some glyphs still have some ragged edges when scaled up even after applying the general diagonal smoothing logic.
+// The structures/classes/arrays below are used to specify hints for smoothing out the few glyphs that need it.
+// The hinting consists of extra triangles to scale up and draw when these specific glyphs are requested.
+// *********************************************************************************************************************
+// Macro to return the number of entries in an array.
+#ifndef count_of
+#define count_of(X) (sizeof(X)/sizeof(X[0]))
+#endif
+
+// For each of the triangle points, should they be aligned to the top, bottom, left, or right corner of the scaled
+// up glyph pixel.
+static const uint32_t TOP = 0 << 1;
+static const uint32_t BOTTOM = 1 << 1;
+static const uint32_t LEFT = 0 << 0;
+static const uint32_t RIGHT = 1 << 0;
+enum PointAlignment
+{
+    TOP_LEFT = TOP | LEFT,
+    TOP_RIGHT = TOP | RIGHT,
+    BOTTOM_LEFT = BOTTOM | LEFT,
+    BOTTOM_RIGHT = BOTTOM | RIGHT
+};
+
+// Represents a single triangle used as a glyph hint. It includes x & y coordinates within the 5x8 glyph and the
+// alignment within the scaled up version of that glyph pixel.
+class Point
+{
+    public:
+        Point(int8_t x, int8_t y, PointAlignment alignment)
+        {
+            m_x = x;
+            m_y = y;
+            m_alignment = alignment;
+        }
+
+        int16_t calcX(int16_t baseX, int16_t scaleX)
+        {
+            int16_t x = baseX;
+            if (m_alignment & RIGHT)
+            {
+                x += (m_x + 2) * scaleX - 1;
+            }
+            else
+            {
+                x += (m_x + 1) * scaleX;
+            }
+            return x;
+        }
+
+        int16_t calcY(int16_t baseY, int16_t scaleY)
+        {
+            int16_t y = baseY;
+            if (m_alignment & BOTTOM)
+            {
+                y += (m_y + 1) * scaleY - 1;
+            }
+            else
+            {
+                y += m_y * scaleY;
+            }
+            return y;
+        }
+
+    int8_t         m_x;
+    int8_t         m_y;
+    PointAlignment m_alignment;
+};
+
+// Represents one of the triangle hints for a glyph.
+struct Triangle
+{
+    Point m_1;
+    Point m_2;
+    Point m_3;
+};
+
+// The hint for a single glyph consists of an array of triangle hints (1 or more).
+struct Hint
+{
+    Triangle*   pTriangles;
+    size_t      triangleCount;
+    char        glyph;
+};
+
+// The triangle hint arrays for each glyph that I want to add a bit of extra smoothing to.
+//      '0'
+static Triangle g_0_Hints[] =
+{
+    { Point{0, 4, BOTTOM_RIGHT}, Point{1, 4, BOTTOM_RIGHT}, Point{0, 5, BOTTOM_RIGHT} },
+    { Point{3, 2, TOP_LEFT},     Point{4, 2, TOP_LEFT},     Point{4, 1, TOP_LEFT} },
+};
+//      '1'
+static Triangle g_1_Hints[] =
+{
+    { Point{2, 0, TOP_LEFT}, Point{2, 1, TOP_LEFT}, Point{1, 1, TOP_LEFT} },
+};
+//      '3'
+static Triangle g_3_Hints[] =
+{
+    { Point{3, 2, TOP_LEFT}, Point{3, 3, TOP_LEFT}, Point{2, 3, TOP_LEFT} },
+};
+//      '4'
+static Triangle g_4_Hints[] =
+{
+    { Point{3, 0, TOP_LEFT}, Point{3, 1, TOP_LEFT}, Point{2, 1, TOP_LEFT} },
+};
+//      'M'
+static Triangle g_M_Hints[] =
+{
+    { Point{0, 0, TOP_RIGHT}, Point{0, 1, TOP_RIGHT}, Point{1, 1, TOP_RIGHT} },
+    { Point{4, 0, TOP_LEFT},  Point{4, 1, TOP_LEFT},  Point{3, 1, TOP_LEFT} },
+};
+//      'N'
+static Triangle g_N_Hints[] =
+{
+    { Point{0, 1, TOP_RIGHT},   Point{0, 2, TOP_RIGHT},   Point{1, 2, TOP_RIGHT} },
+    { Point{3, 4, BOTTOM_LEFT}, Point{4, 4, BOTTOM_LEFT}, Point{4, 5, BOTTOM_LEFT} },
+};
+//      'R'
+static Triangle g_R_Hints[] =
+{
+    { Point{2, 3, BOTTOM_LEFT}, Point{2, 4, BOTTOM_LEFT}, Point{1, 3, BOTTOM_LEFT} },
+};
+//      'Z'
+static Triangle g_Z_Hints[] =
+{
+    { Point{3, 2, TOP_LEFT},     Point{3, 3, TOP_LEFT},     Point{2, 3, TOP_LEFT} },
+    { Point{1, 3, BOTTOM_RIGHT}, Point{2, 3, BOTTOM_RIGHT}, Point{1, 4, BOTTOM_RIGHT} },
+};
+//      'b'
+static Triangle g_b_Hints[] =
+{
+    { Point{0, 3, BOTTOM_RIGHT}, Point{1, 3, BOTTOM_RIGHT}, Point{0, 4, BOTTOM_RIGHT} },
+    { Point{0, 5, TOP_RIGHT},    Point{1, 5, TOP_RIGHT},    Point{0, 4, TOP_RIGHT} },
+};
+//      'd'
+static Triangle g_d_Hints[] =
+{
+    { Point{3, 3, BOTTOM_LEFT}, Point{4, 3, BOTTOM_LEFT}, Point{4, 4, BOTTOM_LEFT} },
+    { Point{3, 5, TOP_LEFT},    Point{4, 5, TOP_LEFT},    Point{3, 4, TOP_LEFT} },
+};
+//      'g'
+static Triangle g_g_Hints[] =
+{
+    { Point{3, 2, TOP_RIGHT}, Point{3, 3, TOP_RIGHT}, Point{4, 3, TOP_RIGHT} },
+};
+//      'h', 'n', and 'r' all need the same triangle added where arch meets left vertical.
+static Triangle g_hnr_Hints[] =
+{
+    { Point{0, 3, BOTTOM_RIGHT}, Point{0, 4, BOTTOM_RIGHT}, Point{1, 3, BOTTOM_RIGHT} },
+};
+//      'u'
+static Triangle g_u_Hints[] =
+{
+    { Point{3, 5, TOP_LEFT}, Point{4, 5, TOP_LEFT}, Point{4, 4, TOP_LEFT} },
+};
+//      'z'
+static Triangle g_z_Hints[] =
+{
+    { Point{0, 6, TOP_LEFT}, Point{1, 6, TOP_LEFT}, Point{1, 5, TOP_LEFT} },
+    { Point{3, 2, BOTTOM_RIGHT}, Point{4, 2, BOTTOM_RIGHT}, Point{3, 3, BOTTOM_RIGHT} },
+};
+
+// The sorted list of glyph hints that can be used from drawSmoothChar() to apply extra smoothing to the few
+// glyphs which require it.
+static Hint g_hints[] =
+{
+    // These must be in alphabetical order so that they can be found with bsearch().
+    { g_0_Hints, count_of(g_0_Hints), '0' },
+    { g_1_Hints, count_of(g_1_Hints), '1' },
+    { g_3_Hints, count_of(g_3_Hints), '3' },
+    { g_4_Hints, count_of(g_4_Hints), '4' },
+    { g_M_Hints, count_of(g_M_Hints), 'M' },
+    { g_N_Hints, count_of(g_N_Hints), 'N' },
+    { g_R_Hints, count_of(g_R_Hints), 'R' },
+    { g_Z_Hints, count_of(g_Z_Hints), 'Z' },
+    { g_b_Hints, count_of(g_b_Hints), 'b' },
+    { g_d_Hints, count_of(g_d_Hints), 'd' },
+    { g_g_Hints, count_of(g_g_Hints), 'g' },
+    { g_hnr_Hints, count_of(g_hnr_Hints), 'h' },
+    { g_hnr_Hints, count_of(g_hnr_Hints), 'n' },
+    { g_hnr_Hints, count_of(g_hnr_Hints), 'r' },
+    { g_u_Hints, count_of(g_u_Hints), 'u' },
+    { g_z_Hints, count_of(g_z_Hints), 'z' },
+};
+
+
+static int compareHints(const void* pv1, const void* pv2)
+{
+    int   c = (int)pv1;
+    const Hint* pHint = (Hint*)pv2;
+    int   key = (int)(int8_t)pHint->glyph;
+
+    return c - key;
+}
+
+void Adafruit_GFX::drawSmoothChar(int16_t x, int16_t y, unsigned char c,
+                                  uint16_t color, uint16_t bg, uint8_t size_x,
+                                  uint8_t size_y)
+{
+    // Find beginning of character glyph in the font file.
+    const uint8_t* pFont = &font[c * 5];
+
+    // Read all 5 columns of the glyph into memory and place dummy bars on the far right and left so that the diagonal
+    // detector doesn't go off on the edges erroneously. Also OR in an extra bit to each column to add a dummy row at
+    // the bottom for the same reason.
+    uint32_t glyph[5+2] = {
+        0x1FFU,
+        (uint32_t)pFont[0] | 0x100U,
+        (uint32_t)pFont[1] | 0x100U,
+        (uint32_t)pFont[2] | 0x100U,
+        (uint32_t)pFont[3] | 0x100U,
+        (uint32_t)pFont[4] | 0x100U,
+        0x1FFU
+    };
+
+    // Can optimize the 2x scaling because one triangle is enough to fill in both pixels required for smoothing.
+    bool scaleIs2x = (size_x == 2) && (size_y == 2);
+
+    // Iterate over each column of the glyph.
+    for (size_t i = 1 ; i <= 5 ; i++)
+    {
+        // Need access to the columns to the left and right of the current column to check for diagonals to be smoothed.
+        uint32_t left = glyph[i-1];
+        uint32_t current = glyph[i];
+        uint32_t right = glyph[i+1];
+
+        // Iterate over the rows of the glyph.
+        for (size_t j = 0 ; j < 8 ; j++)
+        {
+            if (current & 1)
+            {
+                // This pixel of the glyph should be turned on.
+                writeFillRect(x + i * size_x, y + j * size_y, size_x, size_y, color);
+
+                // Check to see if this pixel is the upper part of a 1-pixel wide diagonal that should be smoothed.
+                if ((current & 0b11) == 0b01)
+                {
+                    // The pixel just below this one is off so it might be a diagonal. Check the pixels to right/left.
+                    if ((left & 0b11) == 0b10)
+                    {
+                        fillTriangle(      x + i * size_x, y + j * size_y,
+                                           x + i * size_x, y + (j + 1) * size_y,
+                                     x + (i - 1) * size_x, y + (j + 1) * size_y,
+                                     color);
+                        if (!scaleIs2x)
+                        {
+                            fillTriangle(      x + i * size_x - 1, y + (j + 2) * size_y - 1,
+                                               x + i * size_x - 1, y + (j + 1) * size_y - 1,
+                                         x + (i + 1) * size_x - 1, y + (j + 1) * size_y - 1,
+                                         color);
+                        }
+                    }
+                    if ((right & 0b11) == 0b10)
+                    {
+                        fillTriangle(x + (i + 1) * size_x - 1, y + j * size_y,
+                                     x + (i + 1) * size_x - 1, y + (j + 1) * size_y,
+                                     x + (i + 2) * size_x - 1, y + (j + 1) * size_y,
+                                     color);
+                        if (!scaleIs2x)
+                        {
+                            fillTriangle(x + (i + 1) * size_x, y + (j + 2) * size_y - 1,
+                                         x + (i + 1) * size_x, y + (j + 1) * size_y - 1,
+                                               x + i * size_x, y + (j + 1) * size_y - 1,
+                                         color);
+                        }
+                    }
+                }
+            }
+
+            // Advance to the next row of the glyph.
+            left >>= 1;
+            current >>= 1;
+            right >>= 1;
+        }
+    }
+
+    // Check for hints to apply additional smoothing to this glyph.
+    Hint* pHint= (Hint*)bsearch((void*)(int)(int8_t)c, g_hints, count_of(g_hints), sizeof(g_hints[0]), compareHints);
+    if (pHint == NULL)
+    {
+        return;
+    }
+    // Add in the triangles from the hint, scaled up to the correct size.
+    for (size_t i = 0 ; i < pHint->triangleCount ; i++)
+    {
+        Triangle* pTriangle = &pHint->pTriangles[i];
+        fillTriangle(pTriangle->m_1.calcX(x, size_x), pTriangle->m_1.calcY(y, size_y),
+                     pTriangle->m_2.calcX(x, size_x), pTriangle->m_2.calcY(y, size_y),
+                     pTriangle->m_3.calcX(x, size_x), pTriangle->m_3.calcY(y, size_y),
+                     color);
+    }
+
 }
