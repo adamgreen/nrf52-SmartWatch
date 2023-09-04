@@ -11,6 +11,7 @@
     GNU General Public License for more details.
 */
 // Beginnings of firmware for Bangle.js2 SmartWatch.
+#include <math.h>
 #include <stdarg.h>
 #include <nrf_assert.h>
 #include <nrf_delay.h>
@@ -32,7 +33,13 @@
 #include "SAADCScanner/SAADCScanner.h"
 #include "ColorMemLCD/ColorMemLCD.h"
 #include "BufferLog/BufferLog.h"
-
+#include "Bitmaps/HeartBitmap.h"
+#include "Bitmaps/BluetoothLargeBitmap.h"
+#include "Bitmaps/BluetoothSmallBitmap.h"
+#include "Bitmaps/BatteryBitmap.h"
+#include "Bitmaps/BatterySmallBitmap.h"
+#include "HeartAnimation/HeartAnimation.h"
+#include "CircularBuffer/CircularBuffer.h"
 
 // Bangle.js2 analog battery voltage is connected to this pin through a 1/4 resistor divider.
 static const uint8_t BATTERY_VOLTAGE_PIN = 3;
@@ -87,7 +94,7 @@ static const uint8_t BUTTON_PIN = 11;
 // Value of the RTC1 PRESCALER register.
 #define APP_TIMER_PRESCALER             0
 // Size of timer operation queues.
-#define APP_TIMER_OP_QUEUE_SIZE         2
+#define APP_TIMER_OP_QUEUE_SIZE         3
 
 // Sample the watch battery once a minute.
 #define BATTERY_READ_TICKS              APP_TIMER_TICKS(60000u, APP_TIMER_PRESCALER)
@@ -166,6 +173,9 @@ ColorMemLCD                 g_lcd(&g_lcdSpiInstance, &g_lcdPwmInstance,
                                   LCD_SCLK_PIN, LCD_SI_PIN, LCD_SCS_PIN,
                                   LCD_EXTCOMIN_PIN, LCD_DISP_PIN, LCD_BACKLIGHT_PIN);
 
+// Heart animation object.
+static HeartAnimation       g_heartAnimation(0.2f, 0.5f, 0.05f);
+
 // This counter is incremented each time a UI component is update and the screen should be updated.
 static volatile uint32_t    g_uiUpdates = 1;
 
@@ -173,6 +183,7 @@ static volatile uint32_t    g_uiUpdates = 1;
 static volatile uint16_t    g_hrmConnectionHandle = BLE_CONN_HANDLE_INVALID;
 static volatile bool        g_isHrmConnected = false;
 static volatile uint32_t    g_heartRate = 0;
+static CircularBuffer<uint16_t, 5, true> g_rrIntervals;
 
 // Latest watch battery voltage.
 static volatile float       g_watchBatteryVoltage = 0.0f;
@@ -200,6 +211,8 @@ static uint16_t             g_bleConnectionToRetryDbDiscovery = BLE_CONN_HANDLE_
 APP_TIMER_DEF(g_batteryReadTimer);
 // Timer used to debounce watch button presses.
 APP_TIMER_DEF(g_buttonDebounceTimer);
+// Timer used to animate things like the heart throb.
+APP_TIMER_DEF(g_animationTimer);
 
 // Connection timing parameters requested for BLE connection.
 static const ble_gap_conn_params_t g_bleConnectionParameters =
@@ -265,6 +278,7 @@ static void initLCD();
 static void initTimers();
 static void handleBatteryTimer(void* pvContext);
 static void handleButtonDebounceTimer(void* pvContext);
+static void handleAnimationTimer(void* pvContext);
 static void initBleStack();
 static void initBLE(void);
 static void dispatchBleEvents(ble_evt_t* pBleEvent);
@@ -332,6 +346,8 @@ static void initLCD()
     g_lcd.init();
     g_lcd.turnOn();
     g_lcd.setTextSize(2);
+    bool result = g_heartAnimation.init();
+    ASSERT ( result );
 }
 
 static void initTimers()
@@ -345,6 +361,10 @@ static void initTimers()
     // Create the timer used to debounce watch button presses by ignoring subsequent presses for some time before
     // re-enabling button press interrupts.
     errorCode = app_timer_create(&g_buttonDebounceTimer, APP_TIMER_MODE_SINGLE_SHOT, handleButtonDebounceTimer);
+    APP_ERROR_CHECK(errorCode);
+
+    // Create the timer used to display frames at the correct time.
+    errorCode = app_timer_create(&g_animationTimer, APP_TIMER_MODE_SINGLE_SHOT, handleAnimationTimer);
     APP_ERROR_CHECK(errorCode);
 }
 
@@ -361,6 +381,11 @@ static void handleButtonDebounceTimer(void* pvContext)
     nrf_drv_gpiote_in_event_enable(BUTTON_PIN, true);
 }
 
+static void handleAnimationTimer(void* pvContext)
+{
+    // Let main loop know that there is something on the display to be updated.
+    nrf_atomic_u32_add(&g_uiUpdates, 1);
+}
 static void initBleStack()
 {
     initBLE();
@@ -963,7 +988,15 @@ static void handleHeartRateServiceEvent(ble_hrs_c_t* pHeartRate, ble_hrs_c_evt_t
             logPrintF("Heart Rate = %d.\n", pHeartRateEvent->params.hrm.hr_value);
             for (int i = 0; i < pHeartRateEvent->params.hrm.rr_intervals_cnt; i++)
             {
-                logPrintF("rr_interval = %d.\n", pHeartRateEvent->params.hrm.rr_intervals[i]);
+                uint16_t currInterval = pHeartRateEvent->params.hrm.rr_intervals[i];
+                logPrintF("rr_interval = %d.\n", currInterval);
+
+                // Ignore any readings that are so different from current BPM that they cause weird animation hiccups.
+                int32_t bpmFromInterval = 60000 / (int32_t)currInterval;
+                if (g_heartRate > 0 && abs((int32_t)g_heartRate - bpmFromInterval) < 20)
+                {
+                    g_rrIntervals.write(pHeartRateEvent->params.hrm.rr_intervals[i]);
+                }
             }
             break;
         }
@@ -1307,34 +1340,170 @@ static void updateLCD()
     {
         return;
     }
+    lastUiUpdate = currUiUpdate;
 
     // Prepare the LCD frame buffer for updating.
-    lastUiUpdate = currUiUpdate;
     g_lcd.waitForRefreshToComplete();
-    g_lcd.cls(ColorMemLCD::COLOR_WHITE);
+    g_lcd.fillScreen(ColorMemLCD::COLOR_WHITE);
 
-    // Output watch battery voltage.
-    g_lcd.setTextSize(2);
-    g_lcd.setTextColor(ColorMemLCD::COLOR_BLACK);
-    g_lcd.setCursor(120, 5);
-    g_lcd.printf("%3.1fV", g_watchBatteryVoltage + 0.05f);
+    // General measurements of where things should be placed on the display.
+    const uint32_t topMargin = 2;
+    const uint32_t chargingBitmapWidth = 20;
+    const uint32_t batteryIconXOffset = ColorMemLCD::DISP_WIDTH - g_batteryBitmapWidth - chargingBitmapWidth;
+    const uint32_t bpmTopMargin = 5;
+    const uint32_t throbbingHeartXCenter = 23;
+    const uint32_t hrmBatteryRightMargin = 6;
+
+    // UNDONE: Make these global constants at top of code.
+    // Consider 4.2V full and 3.6V empty.
+    const float maxVoltage = 4.2f;
+    const float minVoltage = 3.6f;
+    const float lowVoltage = 3.8f;
+    const uint8_t lowHrmBatteryPercent = 20;
+
+    // Calculate the battery capacity left based on voltage range. Cap it at 0%.
+    float batteryVoltage = g_watchBatteryVoltage;
+    float batteryPercent = (batteryVoltage - minVoltage) / (maxVoltage - minVoltage);
+    if (batteryPercent < 0.0f)
+    {
+        batteryPercent = 0.0f;
+    }
+#ifdef UNDONE
+    // UNDONE:
+    logPrintF("batteryVoltage=%.2f\n", batteryVoltage);
+    logPrintF("batteryPercent=%.2f\n", batteryPercent);
+#endif // UNDONE
+
+    // Set icon color based on how much battery is left: black for normal and red for low.
+    uint16_t voltageColor = ColorMemLCD::COLOR_BLACK;
+    if (batteryVoltage <= lowVoltage)
+    {
+        voltageColor = ColorMemLCD::COLOR_RED;
+    }
+
+    // Draw battery icon in required color.
+    g_lcd.drawBitmap(batteryIconXOffset, topMargin - 1,
+                     g_batteryBitmap, g_batteryBitmapWidth, g_batteryBitmapHeight, voltageColor);
+
+    // Fill the inside of the battery icon with black and then place a rounded rect of white in the left portion of
+    // the battery icon to indicate how much battery capacity is left.
+    uint32_t rectWidth = batteryPercent * (g_batteryIconRectWidth - 8);
+    g_lcd.fillRoundRect(batteryIconXOffset + 2, topMargin + 1,
+                        g_batteryIconRectWidth - 4, g_batteryBitmapHeight - 4,
+                        g_batteryIconRadius, ColorMemLCD::COLOR_BLACK);
+    g_lcd.fillRoundRect(batteryIconXOffset + 4, topMargin + 3,
+                        rectWidth, g_batteryBitmapHeight - 8,
+                        g_batteryIconRadius, ColorMemLCD::COLOR_WHITE);
+
+
+    // Output watch battery voltage on top of the battery icon.
+    // Draw the 2 voltage characters separately and insert a narrow '.' between them to simulate proportional font.
+    // Use XOR for drawing the voltage on top of the battery icon so that it will be black text on white fill or
+    // white text on black fill. Use a canvas to draw the 'proportional' font so that it can be smoothed without
+    // effecting the XOR operation since smoothing can touch some pixels multiple times.
+    char buffer[3];
+    snprintf(buffer, sizeof(buffer), "%2.0f", batteryVoltage * 10.0f);
+
+    static GFXcanvas1 voltageCanvas(12+4+12, 16);
+    voltageCanvas.fillScreen(0);
+    voltageCanvas.drawChar(0, 0, buffer[0], 1, 1, 2);
+    voltageCanvas.drawChar(7, 0, '.', 1, 1, 2);
+    voltageCanvas.drawChar(12 + 4, 0, buffer[1], 1, 1, 2);
+
+    g_lcd.enableXOR();
+    g_lcd.drawBitmap(batteryIconXOffset + 8, topMargin+4,
+                     voltageCanvas.getBuffer(), voltageCanvas.width(), voltageCanvas.height(), ColorMemLCD::COLOR_WHITE);
+    g_lcd.disableXOR();
+
+    // UNDONE: Add a charging icon if the USB power supply is connected and charging the battery.
 
     // Output BLE connection state or latest heart rate measurement.
-    g_lcd.setTextSize(5);
-    g_lcd.setCursor(50, 60);
     if (g_isHrmConnected)
     {
-        // Display the latest heart rate measurement.
-        g_lcd.printf("%u", g_heartRate);
+        const uint32_t charScale = 5;
+        const uint32_t charWidth = charScale * 6;
+        const uint32_t charHeight = charScale * 8;
 
-        // Display the heart rate monitor battery level.
-        g_lcd.setTextSize(2);
-        g_lcd.setCursor(120, 100);
-        g_lcd.printf("%u%%", g_hrmBatteryLevel);
+        // Display the latest heart rate measurement.
+        char buffer[4];
+        int length = snprintf(buffer, sizeof(buffer), "%lu", g_heartRate);
+
+        g_lcd.setTextSize(charScale);
+        g_lcd.setTextColor(ColorMemLCD::COLOR_BLACK);
+        g_lcd.setCursor(ColorMemLCD::DISP_WIDTH/2 - length * charWidth / 2,
+                        topMargin + g_batteryBitmapHeight + bpmTopMargin);
+        g_lcd.printf("%s", buffer);
+
+        // Cap the battery percent at 100%.
+        if (g_hrmBatteryLevel > 100)
+        {
+            g_hrmBatteryLevel = 100;
+        }
+
+        // Set fill color based on how much battery is left: green for normal and red for low.
+        uint16_t voltageColor = ColorMemLCD::COLOR_GREEN;
+        if (g_hrmBatteryLevel <= lowHrmBatteryPercent)
+        {
+            voltageColor = ColorMemLCD::COLOR_RED;
+        }
+
+        // Draw small battery icon in required color.
+        g_lcd.drawBitmap(ColorMemLCD::DISP_WIDTH - g_batterySmallBitmapWidth - hrmBatteryRightMargin,
+                         topMargin + g_batteryBitmapHeight + bpmTopMargin + charHeight/2 - g_batterySmallBitmapHeight/2 - 2,
+                         g_batterySmallBitmap, g_batterySmallBitmapWidth, g_batterySmallBitmapHeight,
+                         ColorMemLCD::COLOR_BLACK);
+
+        // Fill the inside of the battery icon with black and then place a rounded rect of white in the left portion of
+        // the battery icon to indicate how much battery capacity is left.
+        uint32_t rectWidth = g_hrmBatteryLevel * (g_batterySmallIconRectWidth - 8) / 100;
+        g_lcd.fillRoundRect(ColorMemLCD::DISP_WIDTH - g_batterySmallBitmapWidth - hrmBatteryRightMargin + 2,
+                           topMargin + g_batteryBitmapHeight + bpmTopMargin + charHeight/2 - g_batterySmallBitmapHeight/2 - 2 + 2,
+                           g_batterySmallIconRectWidth - 4, g_batterySmallBitmapHeight - 4,
+                            g_batterySmallIconRadius, ColorMemLCD::COLOR_BLACK);
+        g_lcd.fillRoundRect(ColorMemLCD::DISP_WIDTH - g_batterySmallBitmapWidth - hrmBatteryRightMargin + 4,
+                            topMargin + g_batteryBitmapHeight + bpmTopMargin + charHeight/2 - g_batterySmallBitmapHeight/2 - 2 + 4,
+                            rectWidth, g_batterySmallBitmapHeight - 8,
+                            g_batterySmallIconRadius, voltageColor);
+
+        if (g_heartRate > 0)
+        {
+            static uint16_t lastValidRRInterval = 1000/60;
+            int32_t frameTime_ms = g_heartAnimation.drawAnimationFrame(g_lcd);
+            if (frameTime_ms == 0)
+            {
+                uint16_t currRRInterval;
+                if (!g_rrIntervals.read(currRRInterval))
+                {
+                    currRRInterval = lastValidRRInterval;
+                }
+                else
+                {
+                    lastValidRRInterval = currRRInterval;
+                }
+                frameTime_ms = g_heartAnimation.startAnimation(g_lcd, throbbingHeartXCenter,
+                                                               topMargin + g_batteryBitmapHeight + bpmTopMargin + charHeight/2 - 2,
+                                                                ColorMemLCD::COLOR_RED, currRRInterval);
+            }
+            ASSERT (frameTime_ms >= 0 && frameTime_ms < 1000 );
+            if (frameTime_ms < 1)
+            {
+                frameTime_ms = 1;
+            }
+            ret_code_t errorCode = app_timer_start(g_animationTimer, APP_TIMER_TICKS(frameTime_ms, APP_TIMER_PRESCALER), NULL);
+            APP_ERROR_CHECK(errorCode);
+        }
+
     }
     else
     {
-        g_lcd.printf("N/C");
+        // Draw a heart with BLE icon in the center if not connected.
+        g_lcd.drawBitmap(ColorMemLCD::DISP_WIDTH/2 - g_heartBitmapWidth/2,
+                        ColorMemLCD::DISP_HEIGHT/2 - g_heartBitmapHeight/2,
+                        g_heartBitmap, g_heartBitmapWidth, g_heartBitmapHeight, ColorMemLCD::COLOR_RED);
+        g_lcd.drawBitmap(ColorMemLCD::DISP_WIDTH/2 - g_bluetoothLargeBitmapWidth/2,
+                        ColorMemLCD::DISP_HEIGHT/2 - g_bluetoothLargeBitmapHeight/2,
+                        g_bluetoothLargeBitmap, g_bluetoothLargeBitmapWidth, g_bluetoothLargeBitmapHeight,
+                        ColorMemLCD::COLOR_BLUE);
     }
 
     g_lcd.refresh();

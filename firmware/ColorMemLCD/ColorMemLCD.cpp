@@ -273,8 +273,15 @@ void ColorMemLCD::drawPixel(int16_t x, int16_t y, uint16_t color)
 
     // Update the pixel.
     uint16_t pixel = *pPixel;
-    pixel &= ~(7 << bitOffset);
-    pixel |= color << bitOffset;
+    if (m_xor)
+    {
+        pixel ^= color << bitOffset;
+    }
+    else
+    {
+        pixel &= ~(7 << bitOffset);
+        pixel |= color << bitOffset;
+    }
     *pPixel = pixel;
 
     if (y < m_minDirtyRow)
@@ -330,7 +337,7 @@ void ColorMemLCD::sendCommandBuffer(const uint8_t* pBuffer, size_t bufferLength,
 
 
 // Fill the display memory with the specified colour.
-void ColorMemLCD::cls(uint16_t color)
+void ColorMemLCD::fillScreen(uint16_t color)
 {
     // The color must be 3-bit.
     ASSERT ( (color & 0xFFF8) == 0 );
@@ -365,7 +372,7 @@ void ColorMemLCD::cls(uint16_t color)
 // same.
 void ColorMemLCD::clearDisplay()
 {
-    cls(0);
+    fillScreen(0);
 
     const uint8_t commandBuffer[] = { COLOR_CMD_ALL_CLEAR, 0x00 };
     sendCommandBuffer(commandBuffer, sizeof(commandBuffer), true);

@@ -65,10 +65,12 @@ class ColorMemLCD : public Adafruit_GFX
         bool isBacklightOn();
 
         void clearDisplay();
-        void cls(uint16_t color);
+        virtual void fillScreen(uint16_t color);
         void drawPixel(int16_t x, int16_t y, uint16_t color);
         void setBlinkMode(BlinkModes mode);
         int printf(const char* pFormat, ...);
+        void enableXOR() { m_xor = true; }
+        void disableXOR() { m_xor = false; }
 
         void refresh(bool block = true);
         bool isRefreshInProgress()
@@ -138,4 +140,7 @@ class ColorMemLCD : public Adafruit_GFX
         // The pixel data is stored in this buffer, along with the header and trailer bytes required when sending
         // the frame over SPI.
         uint8_t m_buffer[ROW_SPAN*DISP_HEIGHT+2];
+
+        // Should the new pixel values be XORed with background pixels?
+        bool m_xor = false;
 };
